@@ -28,11 +28,11 @@
 
 // Todo: Potentially make these configurable by an option in the future or auto-detected. This will require the ray portal
 // info to be in its own buffer though likely to not make the RaytraceArgs bigger than it needs to be.
-static const uint8_t maxRayPortalPairCount = uint8_t(1);
+static const uint8_t maxRayPortalPairCount = uint8_t(3);
 // WARNING! When increasing maxRayPortalCount, also change invalidRayPortalIndex to something higher,
 // because RTXDI gradient computation relies on there being (2*maxRayPortalCount) portals in the RaytraceArgs array,
 // where the upper half comes from the previous frame.
-static const uint32_t maxRayPortalCount = 2;
+static const uint32_t maxRayPortalCount = 6;
 // Note: Ray portal index only given 3 bits for packing reasons, giving a max of 7 ray portals that can be active at once,
 // or 3 pairs of 2 which should be enough for most things.
 static const uint8_t invalidRayPortalIndex = uint8_t(0x7);

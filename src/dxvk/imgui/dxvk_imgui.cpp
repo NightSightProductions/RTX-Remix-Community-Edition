@@ -1617,6 +1617,10 @@ namespace dxvk {
             { CameraType::ViewModel,        "ViewModel" },
             { CameraType::Portal0,          "Portal0" },
             { CameraType::Portal1,          "Portal1" },
+            { CameraType::Portal2,          "Portal2" },
+            { CameraType::Portal3,          "Portal3" },
+            { CameraType::Portal4,          "Portal4" },
+            { CameraType::Portal5,          "Portal5" },
             { CameraType::Sky,              "Sky" },
             { CameraType::RenderToTexture,  "RenderToTexture" },
           };

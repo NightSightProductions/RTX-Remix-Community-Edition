@@ -650,12 +650,20 @@ namespace dxvk {
     if (enablePortalVolumes) {
       volumeArgs.cameras[froxelVolumePortal0] = cameraManager.getCamera(CameraType::Portal0).getVolumeShaderConstants(volumeArgs.froxelMaxDistance);
       volumeArgs.cameras[froxelVolumePortal1] = cameraManager.getCamera(CameraType::Portal1).getVolumeShaderConstants(volumeArgs.froxelMaxDistance);
+      volumeArgs.cameras[froxelVolumePortal2] = cameraManager.getCamera(CameraType::Portal2).getVolumeShaderConstants(volumeArgs.froxelMaxDistance);
+      volumeArgs.cameras[froxelVolumePortal3] = cameraManager.getCamera(CameraType::Portal3).getVolumeShaderConstants(volumeArgs.froxelMaxDistance);
+      volumeArgs.cameras[froxelVolumePortal4] = cameraManager.getCamera(CameraType::Portal4).getVolumeShaderConstants(volumeArgs.froxelMaxDistance);
+      volumeArgs.cameras[froxelVolumePortal5] = cameraManager.getCamera(CameraType::Portal5).getVolumeShaderConstants(volumeArgs.froxelMaxDistance);
     }
 
     volumeArgs.restirCameras[froxelVolumeMain] = mainCamera.getVolumeShaderConstants(volumeArgs.froxelMaxDistance, restirGridGuardBandFactor());
     if (enablePortalVolumes) {
       volumeArgs.restirCameras[froxelVolumePortal0] = cameraManager.getCamera(CameraType::Portal0).getVolumeShaderConstants(volumeArgs.froxelMaxDistance, restirGridGuardBandFactor());
       volumeArgs.restirCameras[froxelVolumePortal1] = cameraManager.getCamera(CameraType::Portal1).getVolumeShaderConstants(volumeArgs.froxelMaxDistance, restirGridGuardBandFactor());
+      volumeArgs.restirCameras[froxelVolumePortal2] = cameraManager.getCamera(CameraType::Portal2).getVolumeShaderConstants(volumeArgs.froxelMaxDistance, restirGridGuardBandFactor());
+      volumeArgs.restirCameras[froxelVolumePortal3] = cameraManager.getCamera(CameraType::Portal3).getVolumeShaderConstants(volumeArgs.froxelMaxDistance, restirGridGuardBandFactor());
+      volumeArgs.restirCameras[froxelVolumePortal4] = cameraManager.getCamera(CameraType::Portal4).getVolumeShaderConstants(volumeArgs.froxelMaxDistance, restirGridGuardBandFactor());
+      volumeArgs.restirCameras[froxelVolumePortal5] = cameraManager.getCamera(CameraType::Portal5).getVolumeShaderConstants(volumeArgs.froxelMaxDistance, restirGridGuardBandFactor());
     }
 
     // Validate the froxel max distance against the camera

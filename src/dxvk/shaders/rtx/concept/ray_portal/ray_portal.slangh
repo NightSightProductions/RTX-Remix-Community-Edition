@@ -32,8 +32,15 @@ bool rayPortalHitInfoIsActive(RayPortalHitInfo rayPortalHitInfo) {
 typedef uint8_t PortalSpace2BitsType;     // Using 2 bits only
 #define PORTAL_SPACE_PORTAL_0         0   // Portal space after entering via portal 0
 #define PORTAL_SPACE_PORTAL_1         1   // Portal space after entering via portal 1
+//#define PORTAL_SPACE_PORTAL_2         2   // Portal space after entering via portal 2
+//#define PORTAL_SPACE_PORTAL_3         3   // Portal space after entering via portal 3
+//#define PORTAL_SPACE_PORTAL_4         4   // Portal space after entering via portal 4
+//#define PORTAL_SPACE_PORTAL_5         5   // Portal space after entering via portal 5
+//#define PORTAL_SPACE_NONE             6   // Non-portal / main space before crossing any portals
+//#define PORTAL_SPACE_PORTAL_COMBINED  7   // Portal spaces beyond 2nd portal hit with a same portal index
+
 #define PORTAL_SPACE_NONE             2   // Non-portal / main space before crossing any portals
-#define PORTAL_SPACE_PORTAL_COMBINED  3   // Portal spaces beyond 2nd portal hit with a same portal index
+#define PORTAL_SPACE_PORTAL_COMBINED  3
 
 #if PORTAL_SPACE_PORTAL_1 != PORTAL_SPACE_PORTAL_0 + 1
   #error PORTAL_SPACE_PORTAL_1 must equal (PORTAL_SPACE_PORTAL_0 + 1)

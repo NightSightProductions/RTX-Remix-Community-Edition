@@ -27,7 +27,11 @@
 static const uint froxelVolumeMain = 0;
 static const uint froxelVolumePortal0 = 1;
 static const uint froxelVolumePortal1 = 2;
-static const uint froxelVolumeCount = 3;
+static const uint froxelVolumePortal2 = 3;
+static const uint froxelVolumePortal3 = 4;
+static const uint froxelVolumePortal4 = 5;
+static const uint froxelVolumePortal5 = 6;
+static const uint froxelVolumeCount = 7;
 
 // Note: Ensure 16B alignment
 struct VolumeArgs {

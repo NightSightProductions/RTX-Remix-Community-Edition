@@ -39,6 +39,10 @@ namespace dxvk
       ViewModel,       // Camera for view model rendering
       Portal0,         // Camera associated with rendering portal 0
       Portal1,         // Camera associated with rendering portal 1
+      Portal2,         // Camera associated with rendering portal 2
+      Portal3,         // Camera associated with rendering portal 3
+      Portal4,         // Camera associated with rendering portal 4
+      Portal5,         // Camera associated with rendering portal 5
       Sky,             // Some renderers have separate world / sky cameras
       RenderToTexture, // Camera used to replace a render target texture that is being raytraced.
       Unknown,         // Unset camera state, used mainly for state tracking. Its camera object is aliased 

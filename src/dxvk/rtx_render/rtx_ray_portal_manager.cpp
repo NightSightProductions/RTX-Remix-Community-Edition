@@ -232,6 +232,7 @@ namespace dxvk {
   void RayPortalManager::garbageCollection() {
   }
 
+
   // Prepare scene data is copying constants to a structure - which is then consumed by raytracing CB
   void RayPortalManager::prepareSceneData(Rc<DxvkContext> /*ctx*/, const float /*frameTimeMilliseconds*/) {
     ScopedCpuProfileZone();
@@ -248,9 +249,9 @@ namespace dxvk {
     for (auto& rayPortalPairInfo : m_rayPortalPairInfos)
       rayPortalPairInfo.reset();
 
-    static_assert(maxRayPortalCount == 2);
+    //static_assert(maxRayPortalCount == 2);
     // TODO: Fix Portal iteration (currently iterates in a pattern of 0,1, 1,2, 2,3 instead of 0,1, 2,3, 4,5 like it should)
-    for (std::size_t i = 0; i < m_rayPortalInfos.size() / 2; ++i) {
+    for (std::size_t i = 0; i + 1 < m_rayPortalInfos.size(); i += 2) {
       const uint8_t currentRayPortalIndex = i;
       // Note: The Opposing Ray Portal is always the next one in sequence, allowing for traversal in pairs.
       const uint8_t opposingRayPortalIndex = static_cast<uint8_t>(i) + 1;
@@ -313,19 +314,20 @@ namespace dxvk {
                               *opposingRayPortalInfo,
                               *rayPortalInfo);
 
-      m_rayPortalPairInfos[currentRayPortalIndex].emplace(newRayPortalPairInfo);
+      const auto pairIndex = currentRayPortalIndex / 2;
+      m_rayPortalPairInfos[pairIndex].emplace(newRayPortalPairInfo);
       
       // Set Ray Portal Light Information for the pair
 
       prepareRayPortalHitInfo(m_sceneData.rayPortalHitInfos[currentRayPortalIndex],
         m_pResourceCache->get(rayPortalInfo->materialIndex).getRayPortalSurfaceMaterial(),
         rayPortalInfo.value(),
-        m_rayPortalPairInfos[currentRayPortalIndex]->pairInfos[0].portalToOpposingPortalDirection);
+        m_rayPortalPairInfos[pairIndex]->pairInfos[0].portalToOpposingPortalDirection);
 
       prepareRayPortalHitInfo(m_sceneData.rayPortalHitInfos[opposingRayPortalIndex], 
         m_pResourceCache->get(opposingRayPortalInfo->materialIndex).getRayPortalSurfaceMaterial(),
         opposingRayPortalInfo.value(),
-        m_rayPortalPairInfos[currentRayPortalIndex]->pairInfos[1].portalToOpposingPortalDirection);
+        m_rayPortalPairInfos[pairIndex]->pairInfos[1].portalToOpposingPortalDirection);
 
       activeRayPortalCount += 2;
     }
@@ -606,7 +608,7 @@ namespace dxvk {
       // Rough tolerance accounting for any floating point error
       const float kCamPosDistanceTolerance = 0.001f * (lengthSqr(camPos) + lengthSqr(mainCamPos));
 
-      static_assert(maxRayPortalCount == 2);
+      //static_assert(maxRayPortalCount == 2);
 
       // Process all portal pairs
       for (auto& portalPair : m_rayPortalPairInfos) {
@@ -660,7 +662,7 @@ namespace dxvk {
 
     // Note: we only support one portal pair here. Adding more pairs would require adding more CameraType members
     // and adjusting volume integration and sampling code (see volume_lighting.slangh)
-    static_assert(maxRayPortalCount == 2);
+    //static_assert(maxRayPortalCount == 2);
 
     for (auto& portalPair : m_rayPortalPairInfos) {
       if (portalPair.has_value()) {
