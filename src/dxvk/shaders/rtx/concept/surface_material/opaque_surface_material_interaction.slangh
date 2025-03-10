@@ -485,8 +485,9 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
   // Note: Does not represent if the thin film is enabled in all cases, such as if the thin film enable override is specified, merely concerned with if
   // it has been directly enabled by the material itself.
   const bool thinFilmEnabled = opaqueSurfaceMaterial.flags & OPAQUE_SURFACE_MATERIAL_FLAG_USE_THIN_FILM_LAYER;
+  const bool isEmissiveHack = thinFilmEnabled; //opaqueSurfaceMaterial.flags & OPAQUE_SURFACE_MATERIAL_FLAG_ALPHA_IS_THIN_FILM_THICKNESS; // #xoxor4d - set intensity via unused renderstate
 
-  opaqueSurfaceMaterialInteraction.flags |= thinFilmEnabled ? OPAQUE_SURFACE_MATERIAL_INTERACTION_FLAG_USE_THIN_FILM_LAYER : 0;
+  //opaqueSurfaceMaterialInteraction.flags |= thinFilmEnabled ? OPAQUE_SURFACE_MATERIAL_INTERACTION_FLAG_USE_THIN_FILM_LAYER : 0;
 
 #ifdef OPAQUE_MATERIAL_USE_POM
   if (cb.pomMode != DisplacementMode::Off && opaqueSurfaceMaterial.hasValidDisplacement())
@@ -562,10 +563,10 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
 
   // Note: Set thin film thickness constant fallback only if the thin film is enabled as a non-zero value here is responsible for indicating
   // if the thin film is in use by later code.
-  if (thinFilmEnabled)
-  {
-    thinFilmThickness = opaqueSurfaceMaterial.thinFilmThicknessConstant;
-  }
+  //if (thinFilmEnabled)
+  //{
+  //  thinFilmThickness = opaqueSurfaceMaterial.thinFilmThicknessConstant;
+  //}
 
   if (albedoOpacityLoaded)
   {
@@ -578,12 +579,12 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
     // alpha as thin film thickness flag is only set on the CPU if the use thin film flag is true.
     // Also, the alpha channel of the texture should always be linear even if it is using a sRGB encoding (as the alpha channel in such encodings remains linear),
     // so no special compensation has to be done here (unlike the albedo which may need to have software gamma correction skipped when reading from sRGB textures).
-    if (opaqueSurfaceMaterial.flags & OPAQUE_SURFACE_MATERIAL_FLAG_ALPHA_IS_THIN_FILM_THICKNESS)
-    {
-      thinFilmThickness = albedoOpacitySample.a;
-      opacity = float16_t(1.0f);
-    }
-    else
+    //if (opaqueSurfaceMaterial.flags & OPAQUE_SURFACE_MATERIAL_FLAG_ALPHA_IS_THIN_FILM_THICKNESS)
+    //{
+    //  thinFilmThickness = albedoOpacitySample.a;
+    //  opacity = float16_t(1.0f);
+    //}
+    //else
     {
       opacity = albedoOpacitySample.a;
       thinFilmThickness = float16_t(0.0f);
@@ -674,11 +675,11 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
   // Apply material modifiers/overrides
   albedo = saturate(albedo * cb.opaqueMaterialArgs.albedoScale + cb.opaqueMaterialArgs.albedoBias);
 
-  if (cb.opaqueMaterialArgs.enableThinFilmOverride)
-  {
+  //if (cb.opaqueMaterialArgs.enableThinFilmOverride)
+  //{
     // Note: Thickness override is already normalized to the proper 0-1 range by the CPU to match how the albedo texture alpha channel encodes thickness.
-    thinFilmThickness = cb.opaqueMaterialArgs.thinFilmNormalizedThicknessOverride;
-  }
+  //  thinFilmThickness = cb.opaqueMaterialArgs.thinFilmNormalizedThicknessOverride;
+  //}
 
   // Load Normal
 
@@ -775,6 +776,10 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
   {
     emissiveColor = emissiveColorSample.xyz;
   }
+  else if (isEmissiveHack)
+  {
+      emissiveColor = albedo;
+  }
 
   // Note: Gamma correct emissive color input (be it from a constant or a texture). Currently assuming all textures are not using sRGB formats which
   // automatically do this conversion.
@@ -811,7 +816,13 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
   {
     // Todo: Remove this hack when a proper legacy material model is created, or find some better solution to it (such as setting emissive information on the CPU side).
     derivedEmissiveColor = originalAlbedo;
-    derivedEmissiveIntensity = float16_t(2.0f); // Note: Arbitrary constant, should be set on the CPU side instead and controllable.
+
+    if (isEmissiveHack) { // #xoxor4d - set emissive intensity via unused renderstate 
+      derivedEmissiveIntensity = opaqueSurfaceMaterial.emissiveIntensity;
+    }
+    else {
+      derivedEmissiveIntensity = float16_t(2.0f); // Note: Arbitrary constant, should be set on the CPU side instead and controllable.
+    }
   }
   else if (surface.isEmissiveBlend && cb.enableEmissiveBlendEmissiveOverride)
   {
@@ -819,7 +830,13 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
     // This is so that when "emissive" style blending is used it looks more correct in a physically based way based on the influence from the mode in question.
     // Todo: Move this all once separate Surface Materials for D3D9 compatability and normal usage are created.
     derivedEmissiveColor = originalAlbedo;
-    derivedEmissiveIntensity = emissiveBlendOverrideInfluence * uint16BitsToHalf(cb.emissiveBlendOverrideEmissiveIntensity);
+
+  	if (isEmissiveHack) { // #xoxor4d - set emissive intensity via unused renderstate 
+      derivedEmissiveIntensity = emissiveBlendOverrideInfluence * opaqueSurfaceMaterial.emissiveIntensity;
+    }
+    else {
+      derivedEmissiveIntensity = emissiveBlendOverrideInfluence * uint16BitsToHalf(cb.emissiveBlendOverrideEmissiveIntensity);
+    }
   }
   else
   {
