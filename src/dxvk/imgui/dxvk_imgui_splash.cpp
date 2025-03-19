@@ -37,7 +37,7 @@ namespace dxvk {
            "When set to true this message will be hidden, otherwise it will be displayed on every launch.");
     // Note: 20 chosen as a default here to allow the message to persist long enough to read in case the user focuses on other information on the screen first (e.g.
     // shader compilation messages, text from the application itself in its startup sequence, etc).
-    RTX_OPTION("rtx", std::uint32_t, splashMessageDisplayTimeSeconds, 20, "The amount of time in seconds to display the Remix splash message for.");
+    RTX_OPTION("rtx", std::uint32_t, splashMessageDisplayTimeSeconds, 12, "The amount of time in seconds to display the Remix splash message for.");
     RTX_OPTION("rtx", std::string, welcomeMessage, "", "Display a message to the user on startup, leave empty if no message is to be displayed.");
   };
 
@@ -87,8 +87,14 @@ namespace dxvk {
       ));
 
       if (ImGui::Begin("Splash Message", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove)) {
-        const auto keyBindDescriptor = buildKeyBindDescriptorString(RtxOptions::remixMenuKeyBinds());
-        std::string message = str::format("Welcome to Star Wars Republic Commando RTX. At any time, press ", keyBindDescriptor, " to open up the mod's graphics options. Closing in ", clampedSecondsRemaining);
+        const auto keyBindDescriptor = buildKeyBindDescriptorString(RtxOptions::Get()->remixMenuKeyBinds());
+        std::string message = str::format("Welcome to Garry's Mod RTX.  At any point during gameplay press : ", keyBindDescriptor, " to access the Remix Menu.\n"
+                                        "\n"
+                                        "This is a work in progress, report any bugs you find to https://github.com/Xenthio/gmod-rtx-fixes-2 \n"
+                                        "Please read the 'Known Issues' section on the GitHub page before reporting one. \n"
+                                        "If you need support, please find us on the RTX Remix Showcase Discord server \n"
+                                        "\n"
+                                        "Closing in ", clampedSecondsRemaining);
         ImGui::Text(message.c_str());
       }
       ImGui::End();

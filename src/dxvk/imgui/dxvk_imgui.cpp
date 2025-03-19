@@ -153,6 +153,7 @@ namespace dxvk {
   fast_unordered_cache<FogState> g_imguiFogMap;
   XXH64_hash_t g_usedFogStateHash;
   std::mutex g_imguiFogMapMutex; // protects g_imguiFogMap
+  ImGUI* g_imgui = nullptr;
 
   struct RtxTextureOption {
     const char* uniqueId;
@@ -583,6 +584,8 @@ namespace dxvk {
   , m_hwnd   (nullptr)
   , m_about  (new ImGuiAbout)
   , m_splash  (new ImGuiSplash) {
+    g_imgui = this;
+
     // Clamp Option ranges
 
     RTX_OPTION_CLAMP(reflexStatRangeInterpolationRate, 0.0f, 1.0f);
@@ -660,6 +663,7 @@ namespace dxvk {
   }
 
   ImGUI::~ImGUI() {
+    g_imgui = nullptr;
     g_imguiTextureMap.clear();
 
     ImGui::SetCurrentContext(m_context);

@@ -47,6 +47,7 @@ namespace dxvk {
   class ImGuiCapture;
   class DxvkDevice;
   class DxvkContext;
+  extern ImGUI* g_imgui;
 
   /**
    * \brief DXVK ImGUI
@@ -236,6 +237,7 @@ namespace dxvk {
 
     void showMemoryStats() const;
     bool showRayReconstructionEnable(bool supportsRR);
+    void switchImGuiMenu(UIType type);
 
     RTX_OPTION("rtx.gui", bool, showLegacyTextureGui, false, "A setting to toggle the old texture selection GUI, where each texture category is represented as its own list.");
     RTX_OPTION("rtx.gui", bool, legacyTextureGuiShowAssignedOnly, false, "A setting to show only the textures in a category that are assigned to it (Unassigned textures are found in the new \"Uncategorized\" list at the top).\nRequires: \'Split Texture Category List\' option to be enabled.");

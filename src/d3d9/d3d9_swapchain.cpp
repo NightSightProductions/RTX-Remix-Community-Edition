@@ -34,6 +34,7 @@
 
 // NV-DXVK start: DLFG integration
 #include "../dxvk/rtx_render/rtx_dlfg.h"
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 // NV-DXVK end
 
 namespace dxvk {
@@ -268,6 +269,23 @@ namespace dxvk {
     // Safe from bSkipSwapchainActions as we're just getting a handle that shouldn't
     // be invalidated
     auto& gui = windowData.swapchain->getDxvkDevice()->getCommon()->getImgui();
+    
+    if (message == WM_SETCURSOR) {
+      // If ImGui is initialized and wants to capture mouse
+      if (gui.isInit() && ImGui::GetIO().WantCaptureMouse) {
+        // Let ImGui handle the cursor
+        if (ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam))
+          return TRUE;  // Prevent further processing
+      }
+      // Otherwise, let the game handle it
+      else if (windowData.proc) {
+        return CallCharsetFunction(
+          CallWindowProcW, CallWindowProcA, unicode,
+          windowData.proc, window, message, wParam, lParam);
+      }
+      return FALSE;
+    }
+
     if(gui.isInit()) {
       gui.wndProcHandler(window, message, wParam, lParam);
     }

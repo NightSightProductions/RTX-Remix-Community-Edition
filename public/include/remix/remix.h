@@ -130,6 +130,12 @@ namespace remix {
     }
   }
 
+  enum class UIState {
+      None = REMIXAPI_UI_STATE_NONE,
+      Basic = REMIXAPI_UI_STATE_BASIC,
+      Advanced = REMIXAPI_UI_STATE_ADVANCED
+  };
+
   template< typename T >
   using Result = detail::Result< T >;
 
@@ -189,6 +195,8 @@ namespace remix {
     Result< void >                           pick_HighlightObjects(const uint32_t* objectPickingValues_values,
                                                                    uint32_t objectPickingValues_count,
                                                                    uint8_t colorR, uint8_t colorG, uint8_t colorB);
+    Result<UIState> GetUIState();
+    Result<void> SetUIState(UIState state);
   };
 
   namespace lib {
@@ -208,7 +216,7 @@ namespace remix {
         return status;
       }
 
-      static_assert(sizeof(remixapi_Interface) == 168,
+      static_assert(sizeof(remixapi_Interface) == 184,
                     "Change version, update C++ wrapper when adding new functions");
 
       remix::Interface interfaceInCpp = {};
@@ -258,7 +266,22 @@ namespace remix {
     return m_CInterface.Present(info);
   }
 
+  inline Result<UIState> Interface::GetUIState() {
+    if (!m_CInterface.GetUIState) {
+        return REMIXAPI_ERROR_CODE_NOT_INITIALIZED;
+    }
+    
+    remixapi_UIState state = m_CInterface.GetUIState();
+    return static_cast<UIState>(state);
+  }
 
+  inline Result<void> Interface::SetUIState(UIState state) {
+      if (!m_CInterface.SetUIState) {
+          return REMIXAPI_ERROR_CODE_NOT_INITIALIZED;
+      }
+      
+      return m_CInterface.SetUIState(static_cast<remixapi_UIState>(state));
+  }
 
   struct MaterialInfoOpaqueEXT : remixapi_MaterialInfoOpaqueEXT {
     MaterialInfoOpaqueEXT() {

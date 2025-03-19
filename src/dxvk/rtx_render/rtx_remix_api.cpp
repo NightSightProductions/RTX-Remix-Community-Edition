@@ -762,6 +762,57 @@ namespace {
     return REMIXAPI_ERROR_CODE_SUCCESS;
   }
 
+    remixapi_UIState impl_GetUIState(void) {
+    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
+    if (!remixDevice) {
+        return REMIXAPI_UI_STATE_NONE;
+    }
+    
+    // Map the UIType enum to our API enum
+    switch (dxvk::RtxOptions::Get()->showUI()) {
+        case dxvk::UIType::None:
+            return REMIXAPI_UI_STATE_NONE;
+        case dxvk::UIType::Basic:
+            return REMIXAPI_UI_STATE_BASIC;
+        case dxvk::UIType::Advanced:
+            return REMIXAPI_UI_STATE_ADVANCED;
+        default:
+            return REMIXAPI_UI_STATE_NONE;
+    }
+  }
+
+  remixapi_ErrorCode impl_SetUIState(remixapi_UIState state) {
+    dxvk::D3D9DeviceEx* remixDevice = tryAsDxvk();
+    if (!remixDevice) {
+        return REMIXAPI_ERROR_CODE_REMIX_DEVICE_WAS_NOT_REGISTERED;
+    }
+    
+    dxvk::UIType uiType;
+    switch (state) {
+        case REMIXAPI_UI_STATE_NONE:
+            uiType = dxvk::UIType::None;
+            break;
+        case REMIXAPI_UI_STATE_BASIC:
+            uiType = dxvk::UIType::Basic;
+            break;
+        case REMIXAPI_UI_STATE_ADVANCED:
+            uiType = dxvk::UIType::Advanced;
+            break;
+        default:
+            return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
+    }
+    
+    std::lock_guard lock { s_mutex };
+    
+    // Use the global ImGUI pointer
+    if (dxvk::g_imgui) {
+        dxvk::g_imgui->switchMenu(uiType);
+        return REMIXAPI_ERROR_CODE_SUCCESS;
+    }
+    
+    return REMIXAPI_ERROR_CODE_GENERAL_FAILURE;
+  }
+
   remixapi_ErrorCode REMIXAPI_CALL remixapi_DestroyMaterial(
     remixapi_MaterialHandle handle) {
     if (auto remixDevice = tryAsDxvk()) {
@@ -1536,6 +1587,14 @@ namespace {
 
 extern "C"
 {
+  REMIXAPI remixapi_UIState REMIXAPI_CALL remixapi_GetUIState(void) {
+    return impl_GetUIState();
+  }
+  
+  REMIXAPI remixapi_ErrorCode REMIXAPI_CALL remixapi_SetUIState(remixapi_UIState state) {
+    return impl_SetUIState(state);
+  }
+  
   REMIXAPI remixapi_ErrorCode REMIXAPI_CALL remixapi_InitializeLibrary(const remixapi_InitializeLibraryInfo* info,
                                                                        remixapi_Interface* out_result) {
     if (!info || info->sType != REMIXAPI_STRUCT_TYPE_INITIALIZE_LIBRARY_INFO) {
@@ -1572,8 +1631,10 @@ extern "C"
       interf.dxvk_SetDefaultOutput = remixapi_dxvk_SetDefaultOutput;
       interf.pick_RequestObjectPicking = remixapi_pick_RequestObjectPicking;
       interf.pick_HighlightObjects = remixapi_pick_HighlightObjects;
+      interf.GetUIState = remixapi_GetUIState;
+      interf.SetUIState = remixapi_SetUIState;
     }
-    static_assert(sizeof(interf) == 168, "Add/remove function registration");
+    static_assert(sizeof(interf) == 184, "Add/remove function registration");
 
     *out_result = interf;
     return REMIXAPI_ERROR_CODE_SUCCESS;
