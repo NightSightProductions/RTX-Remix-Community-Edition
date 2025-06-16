@@ -28,6 +28,7 @@
 #include "rtx_options.h"
 #include "rtx_utils.h"
 #include "rtx_asset_data_manager.h"
+#include "rtx_mod_usd.h"
 
 namespace dxvk {
 
@@ -208,6 +209,141 @@ const std::vector<RasterGeometry>& AssetReplacer::accessExternalMesh(remixapi_Me
 
 void AssetReplacer::destroyExternalMesh(remixapi_MeshHandle handle) {
   m_extMeshes.erase(handle);
+}
+
+std::vector<std::pair<std::string, std::vector<std::string>>> AssetReplacer::getTrackedUsdFiles() const {
+  std::vector<std::pair<std::string, std::vector<std::string>>> result;
+  
+  for (const auto& mod : m_modManager.mods()) {
+    std::string modPath = mod->path().string();
+    std::vector<std::string> trackedFiles = mod->getTrackedFiles();
+    
+    if (!trackedFiles.empty()) {
+      result.emplace_back(modPath, std::move(trackedFiles));
+    }
+  }
+  
+  return result;
+}
+
+std::vector<std::pair<std::string, std::vector<std::string>>> AssetReplacer::getAvailableUsdLayers() const {
+  std::vector<std::pair<std::string, std::vector<std::string>>> result;
+  
+  for (const auto& mod : m_modManager.mods()) {
+    std::string modPath = mod->path().string();
+    
+    // Check if this is a USD mod
+    if (auto usdMod = dynamic_cast<UsdMod*>(mod.get())) {
+      std::vector<std::string> availableLayers = usdMod->getAvailableLayers();
+      
+      if (!availableLayers.empty()) {
+        result.emplace_back(modPath, std::move(availableLayers));
+      }
+    }
+  }
+  
+  return result;
+}
+
+std::vector<std::pair<std::string, std::vector<std::string>>> AssetReplacer::getEnabledUsdLayers() const {
+  std::vector<std::pair<std::string, std::vector<std::string>>> result;
+  
+  for (const auto& mod : m_modManager.mods()) {
+    std::string modPath = mod->path().string();
+    
+    // Check if this is a USD mod
+    if (auto usdMod = dynamic_cast<UsdMod*>(mod.get())) {
+      std::vector<std::string> enabledLayers = usdMod->getEnabledLayers();
+      
+      if (!enabledLayers.empty()) {
+        result.emplace_back(modPath, std::move(enabledLayers));
+      }
+    }
+  }
+  
+  return result;
+}
+
+void AssetReplacer::setUsdLayerEnabled(const std::string& modPath, const std::string& layerPath, bool enabled) {
+  for (const auto& mod : m_modManager.mods()) {
+    if (mod->path().string() == modPath) {
+      // Check if this is a USD mod
+      if (auto usdMod = dynamic_cast<UsdMod*>(mod.get())) {
+        usdMod->setLayerEnabled(layerPath, enabled);
+        return;
+      }
+    }
+  }
+  
+  Logger::warn(str::format("Could not find USD mod for path: ", modPath));
+}
+
+void AssetReplacer::refreshModsAndReloadStage(const Rc<DxvkContext>& context) {
+  Logger::info("Starting full mods refresh and USD stage reload...");
+  
+  // Step 1: Force completion of any pending GPU operations
+  Logger::info("Flushing GPU command list and waiting for device idle...");
+  if (context.ptr()) {
+    context->flushCommandList();
+  }
+  context->getDevice()->waitForIdle();
+  
+  // Step 2: Unload all current mods (this now properly waits for async operations)
+  Logger::info("Unloading all current mods...");
+  for (auto& mod : m_modManager.mods()) {
+    mod->unload();
+  }
+  
+  // Step 3: Clear all replacements
+  Logger::info("Clearing all replacement data...");
+  for (auto& mod : m_modManager.mods()) {
+    mod->replacements().clear();
+  }
+  
+  // Step 4: Refresh the mods directory to discover new/removed mods
+  Logger::info("Refreshing mods directory...");
+  m_modManager.refreshMods();
+  Logger::info("Mods directory refreshed - rescanned for new/removed mods");
+  
+  // Step 5: Reload all mods (including any newly discovered ones)
+  Logger::info("Reloading all mods...");
+  for (auto& mod : m_modManager.mods()) {
+    mod->load(context);
+  }
+  
+  // Step 6: Update secret replacements
+  Logger::info("Updating secret replacements...");
+  updateSecretReplacements();
+  
+  Logger::info("Full mods refresh and USD stage reload completed successfully");
+}
+
+std::vector<std::pair<std::string, std::vector<UsdModTypes::LayerInfo>>> AssetReplacer::getUsdLayerHierarchy() const {
+  std::vector<std::pair<std::string, std::vector<UsdModTypes::LayerInfo>>> result;
+  
+  for (const auto& mod : m_modManager.mods()) {
+    std::string modPath = mod->path().string();
+    
+    // Check if this is a USD mod
+    if (auto usdMod = dynamic_cast<UsdMod*>(mod.get())) {
+      std::vector<UsdMod::LayerInfo> hierarchy = usdMod->getLayerHierarchy();
+      
+      if (!hierarchy.empty()) {
+        std::vector<UsdModTypes::LayerInfo> convertedHierarchy;
+        for (const auto& usdLayerInfo : hierarchy) {
+          UsdModTypes::LayerInfo layerInfo;
+          layerInfo.fullPath = usdLayerInfo.fullPath;
+          layerInfo.parentPath = usdLayerInfo.parentPath;
+          layerInfo.displayName = usdLayerInfo.displayName;
+          layerInfo.depth = usdLayerInfo.depth;
+          convertedHierarchy.push_back(layerInfo);
+        }
+        result.emplace_back(modPath, std::move(convertedHierarchy));
+      }
+    }
+  }
+  
+  return result;
 }
 
 } // namespace dxvk

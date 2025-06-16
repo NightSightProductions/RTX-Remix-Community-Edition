@@ -43,6 +43,28 @@ namespace dxvk {
     void unload() override;
     bool checkForChanges(const Rc<DxvkContext>& context) override;
 
+    // Get tracked USD files for debugging/display purposes
+    std::vector<std::string> getTrackedFiles() const;
+    
+    // Check if all async mesh loading operations are complete
+    bool areAsyncOperationsComplete() const;
+    
+    // Layer selection functionality
+    std::vector<std::string> getAvailableLayers() const;
+    std::vector<std::string> getEnabledLayers() const;
+    void setEnabledLayers(const std::vector<std::string>& enabledLayers);
+    bool isLayerEnabled(const std::string& layerPath) const;
+    void setLayerEnabled(const std::string& layerPath, bool enabled);
+    
+    // Hierarchical layer information
+    struct LayerInfo {
+      std::string fullPath;
+      std::string parentPath;
+      std::string displayName;
+      int depth;
+    };
+    std::vector<LayerInfo> getLayerHierarchy() const;
+
     static const ModTypeInfo& getTypeInfo();
 
     static void loadUsdPlugins();

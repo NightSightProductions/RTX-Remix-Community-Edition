@@ -24,9 +24,11 @@
 #include <tuple>
 #include <string>
 #include <optional>
+#include <filesystem>
 #include <nvapi.h>
 #include <NVIDIASansMd.ttf.h>
 #include <RobotoMonoRg.ttf.h>
+#include <functional>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -2749,6 +2751,197 @@ namespace dxvk {
     ImGui::Checkbox("Highlight Legacy Materials (flash red)", &RtxOptions::useHighlightLegacyModeObject());
     ImGui::Checkbox("Highlight Legacy Meshes with Shared Vertex Buffers (dull purple)", &RtxOptions::useHighlightUnsafeAnchorModeObject());
     ImGui::Checkbox("Highlight Replacements with Unstable Anchors (flash red)", &RtxOptions::useHighlightUnsafeReplacementModeObject());
+
+    // Display loaded USD files
+    ImGui::Separator();
+    if (ImGui::CollapsingHeader("Loaded USD Files")) {
+      auto trackedFiles = ctx->getCommonObjects()->getSceneManager().getAssetReplacer()->getTrackedUsdFiles();
+      
+      if (trackedFiles.empty()) {
+        ImGui::TextDisabled("No USD files currently loaded");
+      } else {
+        for (const auto& [modPath, files] : trackedFiles) {
+          // Extract just the filename for the main mod
+          std::filesystem::path modFilePath(modPath);
+          std::string modName = modFilePath.filename().string();
+          
+          if (ImGui::TreeNode(modName.c_str())) {
+            // Sort files to show main file first, then sublayers
+            std::vector<std::string> sortedFiles = files;
+            std::sort(sortedFiles.begin(), sortedFiles.end(), [&modPath](const std::string& a, const std::string& b) {
+              // Main mod file comes first
+              if (a == modPath) return true;
+              if (b == modPath) return false;
+              // Then sort alphabetically
+              return a < b;
+            });
+            
+            for (size_t i = 0; i < sortedFiles.size(); ++i) {
+              const std::string& filePath = sortedFiles[i];
+              std::filesystem::path path(filePath);
+              std::string fileName = path.filename().string();
+              std::string relativePath = std::filesystem::relative(path, modFilePath.parent_path()).string();
+              
+              // Use different icons/indentation for main vs sublayer files
+              if (filePath == modPath) {
+                ImGui::Text("📄 %s (main)", fileName.c_str());
+              } else {
+                ImGui::Text("  └─ %s", relativePath.c_str());
+              }
+              
+              // Add tooltip with full path
+              if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", filePath.c_str());
+              }
+            }
+            ImGui::TreePop();
+          }
+        }
+      }
+      
+      // Add manual reload button
+      ImGui::Separator();
+      ImGui::Text("Manual Controls:");
+      
+      if (ImGui::Button("Invalidate Cache & Reload USD Mods")) {
+        // Get the scene manager and trigger a manual reload
+        auto& sceneManager = m_device->getCommon()->getSceneManager();
+        if (sceneManager.getAssetReplacer()) {
+          Logger::info("Manual USD mod reload triggered from ImGui");
+          
+          // Force a delayed clear to trigger reload on next frame
+          sceneManager.enqueueClearForNextFrame();
+          
+          // Also log this action for debugging
+          Logger::info("USD mod cache invalidation and reload requested by user");
+        }
+      }
+      
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Force reload all USD mod files and clear all caches.\nUse this if mods appear stuck or incomplete after changes.");
+      }
+
+      // Add full rescan and reload button
+      if (ImGui::Button("Rescan Mods & Reload USD Stage")) {
+        // Get the scene manager and trigger a full mods refresh and reload
+        auto& sceneManager = m_device->getCommon()->getSceneManager();
+        if (sceneManager.getAssetReplacer()) {
+          Logger::info("Manual mods rescan and USD stage reload triggered from ImGui");
+          
+          // Perform full refresh of mods directory and reload all USD stages
+          sceneManager.getAssetReplacer()->refreshModsAndReloadStage(ctx);
+          
+          // Also log this action for debugging
+          Logger::info("Full mods directory rescan and USD stage reload completed by user");
+        }
+      }
+      
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Rescan the mods directory for new/removed mods and reload all USD stages.\nUse this after adding, removing, or significantly changing mod files.");
+      }
+    }
+
+    // USD Layer Selection - moved outside of "Loaded USD Files" section
+    if (ImGui::CollapsingHeader("USD Layer Selection", ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::Text("Choose which USD layers to load:");
+      ImGui::Spacing();
+      
+      auto& sceneManager = m_device->getCommon()->getSceneManager();
+      if (sceneManager.getAssetReplacer()) {
+        auto layerHierarchy = sceneManager.getAssetReplacer()->getUsdLayerHierarchy();
+        auto enabledLayers = sceneManager.getAssetReplacer()->getEnabledUsdLayers();
+        
+        // Create a set of enabled layers for quick lookup
+        std::unordered_map<std::string, std::unordered_set<std::string>> enabledLayersMap;
+        for (const auto& [modPath, layers] : enabledLayers) {
+          for (const std::string& layer : layers) {
+            enabledLayersMap[modPath].insert(layer);
+          }
+        }
+        
+        for (const auto& [modPath, hierarchy] : layerHierarchy) {
+          std::filesystem::path modFilePath(modPath);
+          std::string modName = modFilePath.filename().string();
+          
+          // Use a unique ID for each TreeNode to avoid conflicts
+          std::string treeNodeId = "##" + modPath;
+          std::string displayName = modName + treeNodeId;
+          
+          if (ImGui::TreeNode(displayName.c_str(), "%s", modName.c_str())) {
+            ImGui::Text("Available layers for %s:", modName.c_str());
+            ImGui::Spacing();
+            
+            // Add "Select All" and "Select None" buttons
+            std::string selectAllId = "Select All##" + modPath;
+            std::string selectNoneId = "Select None##" + modPath;
+            
+            if (ImGui::Button(selectAllId.c_str())) {
+              for (const auto& layerInfo : hierarchy) {
+                sceneManager.getAssetReplacer()->setUsdLayerEnabled(modPath, layerInfo.fullPath, true);
+              }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(selectNoneId.c_str())) {
+              for (const auto& layerInfo : hierarchy) {
+                sceneManager.getAssetReplacer()->setUsdLayerEnabled(modPath, layerInfo.fullPath, false);
+              }
+            }
+            ImGui::Spacing();
+            
+            // Group layers by depth and parent for hierarchical display
+            std::unordered_map<std::string, std::vector<UsdModTypes::LayerInfo>> layersByParent;
+            for (const auto& layerInfo : hierarchy) {
+              layersByParent[layerInfo.parentPath].push_back(layerInfo);
+            }
+            
+            // Function to recursively display layer hierarchy
+            std::function<void(const std::string&, int)> displayLayerHierarchy = [&](const std::string& parentPath, int depth) {
+              auto it = layersByParent.find(parentPath);
+              if (it == layersByParent.end()) return;
+              
+              for (const auto& layerInfo : it->second) {
+                // Add indentation based on depth
+                for (int i = 0; i < depth; ++i) {
+                  ImGui::Indent(16.0f);
+                }
+                
+                bool isEnabled = enabledLayersMap[modPath].find(layerInfo.fullPath) != enabledLayersMap[modPath].end();
+                
+                // Create unique checkbox ID
+                std::string checkboxId = layerInfo.displayName + "##" + layerInfo.fullPath;
+                
+                if (ImGui::Checkbox(checkboxId.c_str(), &isEnabled)) {
+                  sceneManager.getAssetReplacer()->setUsdLayerEnabled(modPath, layerInfo.fullPath, isEnabled);
+                }
+                
+                // Add tooltip with full relative path
+                if (ImGui::IsItemHovered()) {
+                  std::filesystem::path relativePath = std::filesystem::relative(layerInfo.fullPath, modFilePath.parent_path());
+                  ImGui::SetTooltip("Depth: %d\nPath: %s", layerInfo.depth, relativePath.string().c_str());
+                }
+                
+                // Recursively display children
+                displayLayerHierarchy(layerInfo.fullPath, depth + 1);
+                
+                // Remove indentation
+                for (int i = 0; i < depth; ++i) {
+                  ImGui::Unindent(16.0f);
+                }
+              }
+            };
+            
+            // Start displaying from root level (layers with empty parent path or parent path = modPath)
+            displayLayerHierarchy(modPath, 0);
+            
+            ImGui::TreePop();
+          }
+        }
+        
+        if (layerHierarchy.empty()) {
+          ImGui::TextDisabled("No USD mods with sublayers found");
+        }
+      }
+    }
 
   }
 

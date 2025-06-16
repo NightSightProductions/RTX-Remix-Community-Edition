@@ -201,6 +201,9 @@ public:
   // GameCapturer
   void triggerUsdCapture() const;
   bool isGameCapturerIdle() const;
+  
+  // Manual reload trigger for ImGui
+  void enqueueClearForNextFrame();
 
   using SamplerIndex = uint32_t;
 

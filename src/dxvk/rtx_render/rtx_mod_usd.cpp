@@ -38,6 +38,7 @@
 #include <pxr/usd/sdf/types.h>
 #include <pxr/usd/usd/tokens.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usd/stageCache.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/primCompositionQuery.h>
 #include <pxr/usd/usd/attribute.h>
@@ -58,6 +59,7 @@
 #include <pxr/base/plug/registry.h>
 #include <pxr/base/plug/plugin.h>
 #include <src/usd-plugins/RemixParticleSystem/ParticleSystemAPI.h>
+#include <pxr/usd/sdf/layer.h>
 #include "../../lssusd/usd_include_end.h"
 #include "../util/util_watchdog.h"
 
@@ -70,6 +72,9 @@
 #include "rtx_lights_data.h"
 #include <filesystem>
 #include <algorithm>
+#include <cctype>
+#include <thread>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
@@ -77,6 +82,14 @@ namespace dxvk {
 constexpr uint32_t kMaxU16Indices = 64 * 1024;
 const char* const kStatusKey = "remix_replacement_status";
 
+
+// Structure to store layer hierarchy information
+struct LayerInfo {
+  std::string fullPath;
+  std::string parentPath;
+  std::string displayName;
+  int depth;
+};
 
 class UsdMod::Impl {
 public:
@@ -88,6 +101,24 @@ public:
   void load(const Rc<DxvkContext>& context);
   void unload();
   bool checkForChanges(const Rc<DxvkContext>& context);
+  void clearUsdCaches();
+
+  // Track all USD files and their modification times
+  std::unordered_map<std::string, std::filesystem::file_time_type> m_trackedFiles;
+  
+  // Layer selection functionality
+  std::vector<std::string> m_availableLayers;
+  std::unordered_set<std::string> m_enabledLayers;
+  bool m_layerSelectionChanged = false;
+  
+  // Store filtered sublayers for search path setup
+  std::vector<std::string> m_filteredSublayers;
+
+  // Layer hierarchy
+  std::unordered_map<std::string, LayerInfo> m_layerHierarchy;
+
+  // Check if all async mesh loading operations are complete
+  bool areAsyncOperationsComplete() const;
 
 private:
   UsdMod& m_owner;
@@ -102,6 +133,12 @@ private:
   };
 
   bool haveFilesChanged();
+  void collectAllUsdFiles(const std::string& usdFilePath, const std::filesystem::path& baseDirectory, std::unordered_set<std::string>& visitedFiles);
+  void updateTrackedFiles();
+  void forceFullReload(const Rc<DxvkContext>& context);
+  void collectAvailableLayers();
+  void initializeLayerSelection();
+  pxr::UsdStageRefPtr createFilteredStage(const std::string& rootPath);
 
   void processUSD(const Rc<DxvkContext>& context);
 
@@ -128,7 +165,6 @@ private:
     return XXH64(&id, sizeof(id), kEmptyHash);
   }
 
-  std::filesystem::file_time_type m_fileModificationTime;
   std::string m_openedFilePath;
 
   Watchdog<1000> m_usdChangeWatchdog;
@@ -137,6 +173,11 @@ private:
   std::unordered_map<dxvk::DxvkCommandList*, std::thread> m_cmdListSyncThreads;
   // Asset replacement vector and hash to add when command list execution is complete
   std::unordered_map<dxvk::DxvkCommandList*, std::unordered_map<XXH64_hash_t, std::vector<AssetReplacement>>> m_meshReplacementsToAdd;
+
+  void collectLayersRecursive(const std::string& layerPath, const std::filesystem::path& baseDirectory, 
+                              std::unordered_set<std::string>& visitedLayers, const std::string& parentPath, int depth);
+
+  void validateLayerSelection();
 };
 
 // context and member variable arguments to pass down to anonymous functions (to avoid having USD in the header)
@@ -854,40 +895,508 @@ void UsdMod::Impl::load(const Rc<DxvkContext>& context) {
 
 void UsdMod::Impl::unload() {
   if (m_owner.state().progressState == ProgressState::Loaded) {
+    Logger::info("Unloading USD mod...");
+    
     m_usdChangeWatchdog.stop();
+
+    // CRITICAL: Wait for all async mesh loading threads to complete before clearing data
+    Logger::info("Waiting for async mesh loading threads to complete...");
+    for (auto& [cmdList, thread] : m_cmdListSyncThreads) {
+      if (thread.joinable()) {
+        Logger::info(str::format("Joining thread for command list: ", reinterpret_cast<uintptr_t>(cmdList)));
+        thread.join();
+      }
+    }
+    m_cmdListSyncThreads.clear();
+    m_meshReplacementsToAdd.clear();
+    Logger::info("All async mesh loading threads completed");
+
+    // Clear USD layer caches for a cleaner unload
+    clearUsdCaches();
 
     m_owner.m_replacements->clear();
     AssetDataManager::get().clearSearchPaths();
+    
+    // Clear tracked files
+    m_trackedFiles.clear();
+    
+    // Clear the opened file path
+    m_openedFilePath.clear();
 
     m_owner.setState(ProgressState::Unloaded);
+    
+    Logger::info("USD mod unloaded successfully");
   }
 }
 
 bool UsdMod::Impl::haveFilesChanged() {
-  if (m_openedFilePath.empty())
+  if (m_openedFilePath.empty() || m_trackedFiles.empty())
     return false;
 
-  fs::file_time_type newModTime;
-  if (m_owner.state().progressState == ProgressState::Loaded) {
-    newModTime = fs::last_write_time(fs::path(m_openedFilePath));
-  } else {
-    bool fileFound = false;
-    const auto replacementsUsdPath = fs::path(m_openedFilePath);
-    fileFound = fs::exists(replacementsUsdPath);
-    if (fs::exists(replacementsUsdPath)) {
-      newModTime = fs::last_write_time(replacementsUsdPath);
-    } else {
-      m_owner.setState(ProgressState::Unloaded);
-      return false;
+  // Check all tracked files for changes
+  for (const auto& [filePath, lastModTime] : m_trackedFiles) {
+    if (!fs::exists(fs::path(filePath))) {
+      // File was deleted, trigger reload
+      Logger::info(str::format("USD file deleted, triggering reload: ", filePath));
+      return true;
+    }
+
+    fs::file_time_type currentModTime = fs::last_write_time(fs::path(filePath));
+    if (currentModTime > lastModTime) {
+      Logger::info(str::format("USD file changed, triggering reload: ", filePath));
+      return true;
     }
   }
-  return (newModTime > m_fileModificationTime);
+
+  return false;
 }
+
+void UsdMod::Impl::collectAllUsdFiles(const std::string& usdFilePath, const std::filesystem::path& baseDirectory, std::unordered_set<std::string>& visitedFiles) {
+  // Resolve the full path
+  std::filesystem::path fullPath;
+  if (std::filesystem::path(usdFilePath).is_absolute()) {
+    fullPath = usdFilePath;
+  } else {
+    fullPath = baseDirectory / usdFilePath;
+  }
+  
+  // Normalize the path
+  fullPath = std::filesystem::weakly_canonical(fullPath);
+  std::string fullPathStr = fullPath.string();
+  
+  // Avoid infinite recursion by checking if we've already visited this file
+  if (visitedFiles.find(fullPathStr) != visitedFiles.end()) {
+    return;
+  }
+  visitedFiles.insert(fullPathStr);
+  
+  // Check if file exists and is a USD file
+  if (!fs::exists(fullPath)) {
+    Logger::warn(str::format("USD file not found: ", fullPathStr));
+    return;
+  }
+  
+  // Check if it's a USD file by extension
+  std::string ext = fullPath.extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+  if (ext != ".usd" && ext != ".usda" && ext != ".usdc") {
+    return;
+  }
+  
+  // Add this file to our tracking list
+  try {
+    m_trackedFiles[fullPathStr] = fs::last_write_time(fullPath);
+    Logger::info(str::format("Tracking USD file: ", fullPathStr));
+  } catch (const std::exception& e) {
+    Logger::warn(str::format("Failed to get modification time for: ", fullPathStr, " - ", e.what()));
+    return;
+  }
+  
+  // Try to open the USD file to get its sublayers
+  try {
+    pxr::SdfLayerRefPtr layer = pxr::SdfLayer::FindOrOpen(fullPathStr);
+    if (!layer) {
+      Logger::warn(str::format("Failed to open USD layer: ", fullPathStr));
+      return;
+    }
+    
+    // Get sublayers and recursively process them
+    auto sublayers = layer->GetSubLayerPaths();
+    std::filesystem::path layerBaseDir = fullPath.parent_path();
+    
+    for (const std::string& sublayerPath : sublayers) {
+      collectAllUsdFiles(sublayerPath, layerBaseDir, visitedFiles);
+    }
+  } catch (const std::exception& e) {
+    Logger::warn(str::format("Error processing USD file ", fullPathStr, ": ", e.what()));
+  }
+}
+
+void UsdMod::Impl::updateTrackedFiles() {
+  if (m_openedFilePath.empty()) {
+    return;
+  }
+  
+  // Clear existing tracked files
+  m_trackedFiles.clear();
+  
+  // Collect all USD files recursively
+  std::unordered_set<std::string> visitedFiles;
+  std::filesystem::path baseDirectory = std::filesystem::path(m_openedFilePath).parent_path();
+  
+  collectAllUsdFiles(m_openedFilePath, baseDirectory, visitedFiles);
+  
+  Logger::info(str::format("Now tracking ", m_trackedFiles.size(), " USD files for changes"));
+}
+
+void UsdMod::Impl::clearUsdCaches() {
+  Logger::info("Clearing USD layer caches...");
+  
+  // Clear any cached layer state
+  m_filteredSublayers.clear();
+  
+  // Validate and fix layer selection state
+  validateLayerSelection();
+  
+  // Force USD to reload layers by clearing any cached references
+  // We'll use a different approach that doesn't rely on the layer registry
+  try {
+    // Clear all tracked files by attempting to reload them
+    for (const auto& [filePath, modTime] : m_trackedFiles) {
+      try {
+        // Try to find and reload the layer
+        auto layer = pxr::SdfLayer::FindOrOpen(filePath);
+        if (layer) {
+          Logger::info(str::format("Reloading layer: ", filePath));
+          layer->Reload();
+        }
+      } catch (const std::exception& e) {
+        Logger::warn(str::format("Could not reload layer ", filePath, ": ", e.what()));
+      }
+    }
+    
+    // Note: USD stage caches are typically managed per-context, not globally
+    // Individual stages will be recreated as needed when layers are reloaded
+    Logger::info("USD layer reloading completed");
+    
+  } catch (const std::exception& e) {
+    Logger::warn(str::format("Error during USD cache clearing: ", e.what()));
+  }
+  
+  Logger::info("USD cache clearing completed");
+}
+
+void UsdMod::Impl::validateLayerSelection() {
+  // Ensure we have at least one enabled layer
+  if (m_enabledLayers.empty() && !m_availableLayers.empty()) {
+    Logger::warn("Layer selection validation: No enabled layers found, enabling all layers");
+    for (const std::string& layer : m_availableLayers) {
+      m_enabledLayers.insert(layer);
+    }
+    m_layerSelectionChanged = true;
+  }
+  
+  // Remove any enabled layers that are no longer available
+  std::unordered_set<std::string> validEnabledLayers;
+  for (const std::string& enabledLayer : m_enabledLayers) {
+    if (std::find(m_availableLayers.begin(), m_availableLayers.end(), enabledLayer) != m_availableLayers.end()) {
+      validEnabledLayers.insert(enabledLayer);
+    } else {
+      Logger::warn(str::format("Layer selection validation: Removing invalid enabled layer: ", std::filesystem::path(enabledLayer).filename().string()));
+    }
+  }
+  
+  if (validEnabledLayers.size() != m_enabledLayers.size()) {
+    m_enabledLayers = std::move(validEnabledLayers);
+    m_layerSelectionChanged = true;
+    Logger::info(str::format("Layer selection validation: Fixed enabled layers count to ", m_enabledLayers.size()));
+  }
+}
+
+bool UsdMod::Impl::areAsyncOperationsComplete() const {
+  // Check if there are any active async mesh loading threads
+  for (const auto& [cmdList, thread] : m_cmdListSyncThreads) {
+    if (thread.joinable()) {
+      return false; // Still have active threads
+    }
+  }
+  
+  // Check if there are any pending mesh replacements to add
+  return m_meshReplacementsToAdd.empty();
+}
+
+void UsdMod::Impl::forceFullReload(const Rc<DxvkContext>& context) {
+  Logger::info("Starting force full reload of USD mod...");
+  
+  // Step 1: Stop the watchdog to prevent interference
+  m_usdChangeWatchdog.stop();
+  
+  // Step 2: Wait for all async mesh loading threads to complete
+  Logger::info("Waiting for async mesh loading threads to complete before reload...");
+  for (auto& [cmdList, thread] : m_cmdListSyncThreads) {
+    if (thread.joinable()) {
+      Logger::info(str::format("Joining thread for command list: ", reinterpret_cast<uintptr_t>(cmdList)));
+      thread.join();
+    }
+  }
+  m_cmdListSyncThreads.clear();
+  m_meshReplacementsToAdd.clear();
+  Logger::info("All async mesh loading threads completed before reload");
+  
+  // Step 3: Clear USD layer caches to ensure fresh loading
+  clearUsdCaches();
+  
+  // Step 4: Clear all replacements and asset data
+  m_owner.m_replacements->clear();
+  AssetDataManager::get().clearSearchPaths();
+  
+  // Step 5: Clear tracked files
+  m_trackedFiles.clear();
+  
+  // Step 6: Reset state
+      m_owner.setState(ProgressState::Unloaded);
+  
+  // Step 7: Force a small delay to ensure all operations complete
+  // This helps with any potential race conditions
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  
+  // Step 8: Reload everything from scratch
+  Logger::info("Reloading USD mod from scratch...");
+  processUSD(context);
+  
+  // Step 9: Restart the watchdog
+  m_usdChangeWatchdog.start();
+  
+  Logger::info("Force full reload completed successfully");
+}
+
+void UsdMod::Impl::collectAvailableLayers() {
+  m_availableLayers.clear();
+  m_layerHierarchy.clear();
+  
+  if (m_openedFilePath.empty()) {
+    return;
+  }
+  
+  std::unordered_set<std::string> visitedLayers;
+  std::filesystem::path baseDirectory = std::filesystem::path(m_openedFilePath).parent_path();
+  
+  // Start recursive collection from the root file
+  // Use the mod file path as the parent for root-level sublayers
+  collectLayersRecursive(m_openedFilePath, baseDirectory, visitedLayers, m_openedFilePath, 0);
+  
+  Logger::info(str::format("Collected ", m_availableLayers.size(), " available layers recursively"));
+}
+
+void UsdMod::Impl::collectLayersRecursive(const std::string& layerPath, const std::filesystem::path& baseDirectory, 
+                                          std::unordered_set<std::string>& visitedLayers, const std::string& parentPath, int depth) {
+  // Resolve the full path
+  std::filesystem::path fullPath;
+  if (std::filesystem::path(layerPath).is_absolute()) {
+    fullPath = layerPath;
+  } else {
+    fullPath = baseDirectory / layerPath;
+  }
+  
+  fullPath = std::filesystem::weakly_canonical(fullPath);
+  std::string fullPathStr = fullPath.string();
+  
+  // Avoid infinite recursion by checking if we've already visited this layer
+  if (visitedLayers.find(fullPathStr) != visitedLayers.end()) {
+    return;
+  }
+  visitedLayers.insert(fullPathStr);
+  
+  // Check if file exists
+  if (!std::filesystem::exists(fullPath)) {
+    Logger::warn(str::format("Layer file not found: ", fullPathStr));
+    return;
+  }
+  
+  try {
+    // Open the layer to get its sublayers
+    auto layer = pxr::SdfLayer::FindOrOpen(fullPathStr);
+    if (!layer) {
+      Logger::warn(str::format("Could not open layer: ", fullPathStr));
+      return;
+    }
+    
+    // Add this layer to our available layers list (except for the root file)
+    if (fullPathStr != m_openedFilePath) {
+      m_availableLayers.push_back(fullPathStr);
+      
+      // Store hierarchy information
+      LayerInfo layerInfo;
+      layerInfo.fullPath = fullPathStr;
+      layerInfo.parentPath = parentPath;
+      layerInfo.depth = depth;
+      layerInfo.displayName = fullPath.filename().string();
+      m_layerHierarchy[fullPathStr] = layerInfo;
+      
+      Logger::info(str::format("Found layer at depth ", depth, ": ", layerInfo.displayName));
+    }
+    
+    // Get sublayers and recurse
+    auto sublayers = layer->GetSubLayerPaths();
+    std::filesystem::path layerBaseDirectory = fullPath.parent_path();
+    
+    for (const std::string& sublayerPath : sublayers) {
+      collectLayersRecursive(sublayerPath, layerBaseDirectory, visitedLayers, fullPathStr, depth + 1);
+    }
+    
+  } catch (const std::exception& e) {
+    Logger::warn(str::format("Error processing layer ", fullPathStr, ": ", e.what()));
+  }
+}
+
+void UsdMod::Impl::initializeLayerSelection() {
+  // Only initialize if we don't have any existing selection
+  if (m_enabledLayers.empty()) {
+    // By default, enable all available layers
+    for (const std::string& layer : m_availableLayers) {
+      m_enabledLayers.insert(layer);
+    }
+    Logger::info(str::format("Initialized layer selection with ", m_enabledLayers.size(), " enabled layers"));
+  } else {
+    // Preserve existing selection, but remove any layers that no longer exist
+    std::unordered_set<std::string> validEnabledLayers;
+    for (const std::string& layer : m_availableLayers) {
+      if (m_enabledLayers.find(layer) != m_enabledLayers.end()) {
+        validEnabledLayers.insert(layer);
+      }
+    }
+    
+    // Ensure we have at least one layer enabled to prevent complete failure
+    if (validEnabledLayers.empty() && !m_availableLayers.empty()) {
+      Logger::warn("No valid enabled layers found, enabling all layers to prevent failure");
+      for (const std::string& layer : m_availableLayers) {
+        validEnabledLayers.insert(layer);
+      }
+    }
+    
+    m_enabledLayers = std::move(validEnabledLayers);
+    Logger::info(str::format("Preserved existing layer selection with ", m_enabledLayers.size(), " enabled layers"));
+  }
+  m_layerSelectionChanged = false;
+}
+
+pxr::UsdStageRefPtr UsdMod::Impl::createFilteredStage(const std::string& rootPath) {
+  try {
+    Logger::info("Creating filtered stage with comprehensive temporary layer approach");
+    
+    // Create a map to store all temporary layers we create
+    std::unordered_map<std::string, pxr::SdfLayerRefPtr> tempLayerMap;
+    
+    // Recursive function to create temporary filtered copies of all layers
+    std::function<pxr::SdfLayerRefPtr(const std::string&, const std::filesystem::path&)> createFilteredLayerCopy = 
+      [&](const std::string& layerPath, const std::filesystem::path& baseDirectory) -> pxr::SdfLayerRefPtr {
+        
+        // Resolve the full path
+        std::filesystem::path fullPath;
+        if (std::filesystem::path(layerPath).is_absolute()) {
+          fullPath = layerPath;
+        } else {
+          fullPath = baseDirectory / layerPath;
+        }
+        fullPath = std::filesystem::weakly_canonical(fullPath);
+        std::string fullPathStr = fullPath.string();
+        
+        // Check if we already created a temp copy of this layer
+        if (tempLayerMap.find(fullPathStr) != tempLayerMap.end()) {
+          return tempLayerMap[fullPathStr];
+        }
+        
+        // Open the original layer
+        auto originalLayer = pxr::SdfLayer::FindOrOpen(fullPathStr);
+        if (!originalLayer) {
+          Logger::warn(str::format("Could not open layer for filtering: ", fullPathStr));
+          return nullptr;
+        }
+        
+        // Create a temporary copy
+        std::string tempIdentifier = "temp_filtered_" + std::filesystem::path(fullPathStr).filename().string();
+        auto tempLayer = pxr::SdfLayer::CreateAnonymous(tempIdentifier);
+        if (!tempLayer) {
+          Logger::err(str::format("Failed to create temporary layer for: ", fullPathStr));
+          return nullptr;
+        }
+        
+        // Copy all content from original to temporary
+        tempLayer->TransferContent(originalLayer);
+        
+        // Store in our map
+        tempLayerMap[fullPathStr] = tempLayer;
+        
+        Logger::info(str::format("Created temporary copy of layer: ", std::filesystem::path(fullPathStr).filename().string()));
+        
+        // Now filter the sublayers of this temporary layer
+        auto originalSublayers = tempLayer->GetSubLayerPaths();
+        if (!originalSublayers.empty()) {
+          std::vector<std::string> filteredSublayers;
+          std::filesystem::path layerBaseDirectory = fullPath.parent_path();
+          
+          Logger::info(str::format("Filtering ", originalSublayers.size(), " sublayers for: ", std::filesystem::path(fullPathStr).filename().string()));
+          
+          for (const std::string& sublayerPath : originalSublayers) {
+            // Convert relative path to absolute for comparison
+            std::filesystem::path absolutePath = layerBaseDirectory / sublayerPath;
+            std::string absolutePathStr = std::filesystem::weakly_canonical(absolutePath).string();
+            
+            // Check if this sublayer is enabled
+            if (m_enabledLayers.find(absolutePathStr) != m_enabledLayers.end()) {
+              // Create a filtered copy of the sublayer recursively
+              auto filteredSublayer = createFilteredLayerCopy(absolutePathStr, layerBaseDirectory);
+              if (filteredSublayer) {
+                filteredSublayers.push_back(sublayerPath);
+                Logger::info(str::format("  Including sublayer: ", sublayerPath));
+              }
+            } else {
+              Logger::info(str::format("  Excluding sublayer: ", sublayerPath));
+            }
+          }
+          
+          // Apply the filtered sublayer list to our temporary layer
+          tempLayer->SetSubLayerPaths(filteredSublayers);
+          Logger::info(str::format("  Filtered ", originalSublayers.size(), " -> ", filteredSublayers.size(), " sublayers"));
+        }
+        
+        return tempLayer;
+      };
+    
+    // Create the filtered root layer
+    std::filesystem::path rootBaseDirectory = std::filesystem::path(rootPath).parent_path();
+    auto filteredRootLayer = createFilteredLayerCopy(rootPath, rootBaseDirectory);
+    
+    if (!filteredRootLayer) {
+      Logger::err("Failed to create filtered root layer");
+      return nullptr;
+    }
+    
+    // Store the filtered sublayers for search path setup
+    m_filteredSublayers = filteredRootLayer->GetSubLayerPaths();
+    
+    Logger::info(str::format("Created ", tempLayerMap.size(), " temporary filtered layers"));
+    
+    // Create the stage using the filtered root layer
+    auto filteredStage = pxr::UsdStage::Open(filteredRootLayer, pxr::UsdStage::LoadAll);
+    
+    if (!filteredStage) {
+      Logger::err("Failed to create filtered stage from temporary layers");
+      return nullptr;
+    }
+    
+    Logger::info("Successfully created filtered stage with comprehensive layer filtering");
+    return filteredStage;
+    
+  } catch (const std::exception& e) {
+    Logger::err(str::format("Error creating filtered stage: ", e.what()));
+    return nullptr;
+  }
+}
+
+
 
 bool UsdMod::Impl::checkForChanges(const Rc<DxvkContext>& context) {
   if (m_usdChangeWatchdog.hasSignaled()) {
-    unload();
-    load(context);
+    Logger::info("USD file change detected, performing full reload...");
+    
+    // Perform a more thorough unload and reload
+    forceFullReload(context);
+    return true;
+  }
+  
+  // Check if layer selection has changed
+  if (m_layerSelectionChanged) {
+    Logger::info("USD layer selection changed, performing reload...");
+    Logger::info(str::format("Current enabled layers: ", m_enabledLayers.size(), " out of ", m_availableLayers.size()));
+    for (const auto& enabledLayer : m_enabledLayers) {
+      Logger::info(str::format("  Currently enabled: ", std::filesystem::path(enabledLayer).filename().string()));
+    }
+    
+    m_layerSelectionChanged = false;
+    
+    // Perform a full reload with new layer selection
+    forceFullReload(context);
     return true;
   }
 
@@ -902,33 +1411,92 @@ void UsdMod::Impl::processUSD(const Rc<DxvkContext>& context) {
 
   m_owner.setState(ProgressState::OpeningUSD);
 
-  pxr::UsdStageRefPtr stage = pxr::UsdStage::Open(replacementsUsdPath, pxr::UsdStage::LoadAll);
+  // Ensure we're loading fresh data by reloading any existing cached layers
+  try {
+    auto existingLayer = pxr::SdfLayer::FindOrOpen(replacementsUsdPath);
+    if (existingLayer) {
+      Logger::info(str::format("Reloading existing cached layer before opening: ", replacementsUsdPath));
+      existingLayer->Reload();
+    }
+  } catch (const std::exception& e) {
+    Logger::warn(str::format("Warning: Could not reload existing layer cache: ", e.what()));
+  }
+
+  // Collect available layers first to determine if we need filtering
+  m_openedFilePath = replacementsUsdPath;
+  collectAvailableLayers();
+  initializeLayerSelection();
+  
+  pxr::UsdStageRefPtr stage;
+  
+  // Check if we have any disabled layers
+  bool hasDisabledLayers = (m_enabledLayers.size() < m_availableLayers.size());
+  
+  Logger::info(str::format("Layer filtering check: ", m_enabledLayers.size(), " enabled out of ", m_availableLayers.size(), " available layers"));
+  
+  // Validate that we have at least one enabled layer
+  if (m_enabledLayers.empty()) {
+    Logger::warn("No enabled layers found, enabling all layers to prevent failure");
+    for (const std::string& layer : m_availableLayers) {
+      m_enabledLayers.insert(layer);
+    }
+    hasDisabledLayers = false;
+  }
+  
+  if (hasDisabledLayers) {
+    Logger::info("Creating filtered USD stage with selected layers only");
+    Logger::info(str::format("Enabled layers: ", m_enabledLayers.size(), " out of ", m_availableLayers.size()));
+    for (const auto& enabledLayer : m_enabledLayers) {
+      Logger::info(str::format("  Enabled: ", std::filesystem::path(enabledLayer).filename().string()));
+    }
+    for (const auto& availableLayer : m_availableLayers) {
+      if (m_enabledLayers.find(availableLayer) == m_enabledLayers.end()) {
+        Logger::info(str::format("  Disabled: ", std::filesystem::path(availableLayer).filename().string()));
+      }
+    }
+    
+    stage = createFilteredStage(replacementsUsdPath);
+    
+    if (!stage) {
+      Logger::err("Filtered stage creation failed, falling back to original stage");
+      stage = pxr::UsdStage::Open(replacementsUsdPath, pxr::UsdStage::LoadAll);
+      m_filteredSublayers.clear(); // Clear filtered sublayers since we're using original
+    }
+  } else {
+    Logger::info("Loading all USD layers (no filtering)");
+    stage = pxr::UsdStage::Open(replacementsUsdPath, pxr::UsdStage::LoadAll);
+    m_filteredSublayers.clear(); // Clear any previous filtered sublayers
+  }
 
   if (!stage) {
     Logger::err(str::format("USD mod file failed parsing: ", std::filesystem::weakly_canonical(replacementsUsdPath).string()));
     m_openedFilePath.clear();
-    m_fileModificationTime = fs::file_time_type();
+    m_trackedFiles.clear();
     m_owner.setState(ProgressState::Unloaded);
     return;
   }
 
   std::filesystem::path modBaseDirectory = std::filesystem::path(replacementsUsdPath).remove_filename();
-  m_openedFilePath = replacementsUsdPath;
 
   // Iterate sublayers in the strength order, resolve the base paths and
   // populate asset manager search paths.
-  auto sublayers = stage->GetRootLayer()->GetSubLayerPaths();
+  // Use filtered sublayers if filtering was applied, otherwise use all sublayers
+  auto sublayers = hasDisabledLayers ? m_filteredSublayers : stage->GetRootLayer()->GetSubLayerPaths();
+  Logger::info(str::format("Setting up asset search paths for ", sublayers.size(), " sublayers", hasDisabledLayers ? " (filtered)" : ""));
+  
   for (size_t i = 0, s = sublayers.size(); i < s; i++) {
     const std::string& identifier = sublayers[i];
     auto layerBasePath = std::filesystem::path(identifier).remove_filename();
     auto fullLayerBasePath = modBaseDirectory / layerBasePath;
     AssetDataManager::get().addSearchPath(i, fullLayerBasePath);
+    Logger::info(str::format("Added search path ", i, ": ", fullLayerBasePath.string()));
   }
 
   // Add stage's base path last.
   AssetDataManager::get().addSearchPath(sublayers.size(), modBaseDirectory);
 
-  m_fileModificationTime = fs::last_write_time(fs::path(m_openedFilePath));
+  // Update tracked files to include all sublayers recursively
+  updateTrackedFiles();
   pxr::UsdGeomXformCache xformCache;
 
   pxr::VtDictionary layerData = stage->GetRootLayer()->GetCustomLayerData();
@@ -1465,6 +2033,95 @@ void UsdMod::unload() {
 
 bool UsdMod::checkForChanges(const Rc<DxvkContext>& context) {
   return m_impl->checkForChanges(context);
+}
+
+std::vector<std::string> UsdMod::getTrackedFiles() const {
+  std::vector<std::string> files;
+  for (const auto& [filePath, modTime] : m_impl->m_trackedFiles) {
+    files.push_back(filePath);
+  }
+  return files;
+}
+
+bool UsdMod::areAsyncOperationsComplete() const {
+  return m_impl->areAsyncOperationsComplete();
+}
+
+std::vector<std::string> UsdMod::getAvailableLayers() const {
+  return m_impl->m_availableLayers;
+}
+
+std::vector<std::string> UsdMod::getEnabledLayers() const {
+  std::vector<std::string> enabled;
+  for (const std::string& layer : m_impl->m_availableLayers) {
+    if (m_impl->m_enabledLayers.find(layer) != m_impl->m_enabledLayers.end()) {
+      enabled.push_back(layer);
+    }
+  }
+  return enabled;
+}
+
+void UsdMod::setEnabledLayers(const std::vector<std::string>& enabledLayers) {
+  m_impl->m_enabledLayers.clear();
+  for (const std::string& layer : enabledLayers) {
+    m_impl->m_enabledLayers.insert(layer);
+  }
+  m_impl->m_layerSelectionChanged = true;
+  Logger::info(str::format("Layer selection updated: ", enabledLayers.size(), " layers enabled"));
+}
+
+bool UsdMod::isLayerEnabled(const std::string& layerPath) const {
+  return m_impl->m_enabledLayers.find(layerPath) != m_impl->m_enabledLayers.end();
+}
+
+void UsdMod::setLayerEnabled(const std::string& layerPath, bool enabled) {
+  // Validate that the layer exists in our available layers
+  auto it = std::find(m_impl->m_availableLayers.begin(), m_impl->m_availableLayers.end(), layerPath);
+  if (it == m_impl->m_availableLayers.end()) {
+    Logger::warn(str::format("Attempted to set state for unknown layer: ", std::filesystem::path(layerPath).filename().string()));
+    return;
+  }
+  
+  if (enabled) {
+    m_impl->m_enabledLayers.insert(layerPath);
+  } else {
+    // Prevent disabling all layers - ensure at least one remains enabled
+    if (m_impl->m_enabledLayers.size() <= 1) {
+      Logger::warn("Cannot disable the last remaining layer - at least one layer must remain enabled");
+      return;
+    }
+    m_impl->m_enabledLayers.erase(layerPath);
+  }
+  
+  m_impl->m_layerSelectionChanged = true;
+  
+  // Clear any cached state to ensure consistent behavior
+  m_impl->clearUsdCaches();
+  
+  std::filesystem::path layer(layerPath);
+  std::string layerName = layer.filename().string();
+  Logger::info(str::format("Layer '", layerName, "' ", enabled ? "enabled" : "disabled", " (", m_impl->m_enabledLayers.size(), "/", m_impl->m_availableLayers.size(), " layers enabled)"));
+}
+
+std::vector<UsdMod::LayerInfo> UsdMod::getLayerHierarchy() const {
+  std::vector<UsdMod::LayerInfo> hierarchy;
+  
+  for (const std::string& layerPath : m_impl->m_availableLayers) {
+    auto it = m_impl->m_layerHierarchy.find(layerPath);
+    if (it != m_impl->m_layerHierarchy.end()) {
+      const auto& implLayerInfo = it->second;
+      
+      UsdMod::LayerInfo layerInfo;
+      layerInfo.fullPath = implLayerInfo.fullPath;
+      layerInfo.parentPath = implLayerInfo.parentPath;
+      layerInfo.displayName = implLayerInfo.displayName;
+      layerInfo.depth = implLayerInfo.depth;
+      
+      hierarchy.push_back(layerInfo);
+    }
+  }
+  
+  return hierarchy;
 }
 
 struct UsdModTypeInfo final : public ModTypeInfo {

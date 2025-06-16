@@ -33,6 +33,19 @@ namespace dxvk {
   class DxvkContext;
   class DxvkDevice;
   class DxvkCommandList;
+  class RtxContext;
+  class SceneManager;
+  class UsdMod;
+  
+  // Forward declaration for UsdMod::LayerInfo
+  namespace UsdModTypes {
+    struct LayerInfo {
+      std::string fullPath;
+      std::string parentPath;
+      std::string displayName;
+      int depth;
+    };
+  }
 
   struct Categorizer {
     CategoryFlags categoryFlags;
@@ -288,6 +301,18 @@ namespace dxvk {
     void registerExternalMesh(remixapi_MeshHandle handle, std::vector<RasterGeometry>&& submeshes);
     [[nodiscard]] const std::vector<RasterGeometry>& accessExternalMesh(remixapi_MeshHandle handle) const;
     void destroyExternalMesh(remixapi_MeshHandle handle);
+
+    // Get tracked USD files for debugging/display purposes
+    std::vector<std::pair<std::string, std::vector<std::string>>> getTrackedUsdFiles() const;
+    
+    // Layer selection functionality
+    std::vector<std::pair<std::string, std::vector<std::string>>> getAvailableUsdLayers() const;
+    std::vector<std::pair<std::string, std::vector<std::string>>> getEnabledUsdLayers() const;
+    void setUsdLayerEnabled(const std::string& modPath, const std::string& layerPath, bool enabled);
+    std::vector<std::pair<std::string, std::vector<UsdModTypes::LayerInfo>>> getUsdLayerHierarchy() const;
+
+    // Refresh mods directory and reload all USD stages
+    void refreshModsAndReloadStage(const Rc<DxvkContext>& context);
 
   private:
     void updateSecretReplacements();

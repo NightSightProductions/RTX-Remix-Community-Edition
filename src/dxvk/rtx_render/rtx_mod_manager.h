@@ -75,6 +75,8 @@ public:
   virtual void unload() = 0;
   // Updates the replacements if mod changed.
   virtual bool checkForChanges(const Rc<DxvkContext>& context) = 0;
+  // Get tracked files for debugging/display purposes
+  virtual std::vector<std::string> getTrackedFiles() const { return {}; }
 
   State state() const {
     const auto encodedState{ m_state.load() };
