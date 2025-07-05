@@ -724,6 +724,9 @@ namespace dxvk {
   }
 
   void RtxContext::endFrame(std::uint64_t cachedReflexFrameId, Rc<DxvkImage> targetImage, bool callInjectRtx) {
+    
+    // Clean up stale delayed sky geometry
+    cleanupStaleDelayedSkyGeometry();
 
     if (callInjectRtx) {
       // Fallback inject (is a no-op if already injected this frame, or no valid RT scene)
@@ -853,6 +856,19 @@ namespace dxvk {
         }
         // fallback
         drawCallState.cameraType = CameraType::Enum::Main;
+      }
+
+      // Check for conflicting camera renders before processing
+      if (isConflictingCameraRender(drawCallState)) {
+        if (RtxOptions::skyReprojectLogFallbacks()) {
+          ONCE(Logger::debug("[RTX-Sky] Skipping conflicting camera render"));
+        }
+        return;
+      }
+
+      // Update main camera signature tracking
+      if (drawCallState.cameraType == CameraType::Main) {
+        m_lastMainCameraSignature = calculateCameraSignature(drawCallState.transformData);
       }
 
       if (tryHandleSky(&params, &drawCallState) == TryHandleSkyResult::SkipSubmit) {
@@ -2585,6 +2601,138 @@ namespace dxvk {
     if (curColorView != nullptr) {
       bindResourceView(drawCallState.materialData.colorTextureSlot[0], curColorView, nullptr);
     }
+  }
+
+  // Sky camera helper methods
+  bool RtxContext::isSkyCameraStale() const {
+    if (RtxOptions::skyReprojectCameraTimeoutFrames() == 0) {
+      return false; // Timeout disabled
+    }
+    
+    const uint32_t currentFrame = m_device->getCurrentFrameId();
+    const uint32_t framesSinceLastSkyCamera = currentFrame - m_lastSkyCameraFrame;
+    
+    return framesSinceLastSkyCamera > RtxOptions::skyReprojectCameraTimeoutFrames();
+  }
+
+  void RtxContext::updateSkyCameraState() {
+    m_lastSkyCameraFrame = m_device->getCurrentFrameId();
+    
+    // Update sky camera signature if we have delayed sky geometry
+    if (!m_delayedRayTracedSky.empty()) {
+      m_lastSkyCameraSignature = calculateCameraSignature(m_delayedRayTracedSky[0].transformData);
+    }
+  }
+
+  void RtxContext::cleanupStaleDelayedSkyGeometry() {
+    if (!m_delayedRayTracedSky.empty() && isSkyCameraStale()) {
+      if (RtxOptions::skyReprojectLogFallbacks()) {
+        Logger::info("[RTX-Sky] Clearing delayed sky geometry due to stale sky camera");
+      }
+      m_delayedRayTracedSky.clear();
+      m_skyGeometryQueuedFrame = 0;
+      
+      // Reset camera signatures when clearing stale geometry
+      if (RtxOptions::skyReprojectPreventCameraConflicts()) {
+        resetCameraSignatures();
+      }
+    }
+  }
+
+  bool RtxContext::isSkyCameraDataValid(const DrawCallState& skyGeometry) const {
+    // Get a non-const reference to this for accessing scene manager
+    RtxContext* nonConstThis = const_cast<RtxContext*>(this);
+    const auto& cameraManager = nonConstThis->getSceneManager().getCameraManager();
+    
+    // Check if we have a valid sky camera
+    if (!cameraManager.isCameraValid(CameraType::Sky)) {
+      return false;
+    }
+    
+    const RtCamera& skyCam = cameraManager.getCamera(CameraType::Sky);
+    
+    // Check if sky camera was updated recently (within last few frames)
+    const uint32_t currentFrame = m_device->getCurrentFrameId();
+    const uint32_t skyFrameAge = currentFrame - skyCam.getLastUpdateFrame();
+    
+    // Allow some tolerance for frame timing differences
+    if (skyFrameAge > 3) {
+      return false;
+    }
+    
+    // Additional validation: check if transform matrices are reasonable
+    const auto& skyTransform = skyGeometry.transformData;
+    
+    // Check for degenerate matrices (determinant near zero)
+    const float det = determinant(skyTransform.worldToView);
+    if (std::abs(det) < 1e-6f) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  bool RtxContext::shouldFallbackToRasterization() const {
+    if (!RtxOptions::skyReprojectFallbackToRaster() || m_delayedRayTracedSky.empty()) {
+      return false;
+    }
+    
+    // Check if any of the delayed sky geometry has invalid camera data
+    for (const auto& skyGeometry : m_delayedRayTracedSky) {
+      if (!isSkyCameraDataValid(skyGeometry)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  XXH64_hash_t RtxContext::calculateCameraSignature(const DrawCallTransforms& transforms) const {
+    // Create a signature based on view and projection matrices
+    // We use a combination of matrices to uniquely identify camera configurations
+    XXH64_hash_t signature = 0;
+    
+    // Hash the world-to-view matrix (camera position and orientation)
+    signature = XXH64(&transforms.worldToView, sizeof(transforms.worldToView), signature);
+    
+    // Hash the view-to-projection matrix (camera intrinsics)
+    signature = XXH64(&transforms.viewToProjection, sizeof(transforms.viewToProjection), signature);
+    
+    return signature;
+  }
+
+  bool RtxContext::isConflictingCameraRender(const DrawCallState& drawCallState) const {
+    if (!RtxOptions::skyReprojectPreventCameraConflicts()) {
+      return false;
+    }
+    
+    const XXH64_hash_t currentSignature = calculateCameraSignature(drawCallState.transformData);
+    
+    // Check if this render call conflicts with known camera signatures
+    if (drawCallState.cameraType == CameraType::Sky) {
+      // If we're rendering sky geometry but the signature matches a known main camera
+      if (m_lastMainCameraSignature != 0 && currentSignature == m_lastMainCameraSignature) {
+        if (RtxOptions::skyReprojectLogFallbacks()) {
+          ONCE(Logger::info("[RTX-Sky] Detected sky geometry with main camera signature - preventing conflict"));
+        }
+        return true;
+      }
+    } else if (drawCallState.cameraType == CameraType::Main) {
+      // If we're rendering main geometry but the signature matches a known sky camera
+      if (m_lastSkyCameraSignature != 0 && currentSignature == m_lastSkyCameraSignature) {
+        if (RtxOptions::skyReprojectLogFallbacks()) {
+          ONCE(Logger::info("[RTX-Sky] Detected main geometry with sky camera signature - preventing conflict"));
+        }
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  void RtxContext::resetCameraSignatures() {
+    m_lastSkyCameraSignature = 0;
+    m_lastMainCameraSignature = 0;
   }
 
   void RtxContext::clearRenderTarget(const Rc<DxvkImageView>& imageView,

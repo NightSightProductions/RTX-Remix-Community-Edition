@@ -2989,6 +2989,28 @@ namespace dxvk {
           {
             ImGui::BeginDisabled(!RtxOptions::skyReprojectToMainCameraSpace());
             ImGui::DragFloat("Reprojected Sky Scale", &RtxOptions::skyReprojectScaleObject(), 1.0f, 0.1f, 1000.0f);
+            ImGui::DragInt("Camera Timeout (Frames)", reinterpret_cast<int*>(&RtxOptions::skyReprojectCameraTimeoutFramesObject()), 1, 0, 300);
+            if (ImGui::IsItemHovered()) {
+              ImGui::SetTooltip("Number of frames after which delayed sky geometry is discarded if sky camera becomes stale. Set to 0 to disable.");
+            }
+            ImGui::Checkbox("Fallback to Rasterization", &RtxOptions::skyReprojectFallbackToRasterObject());
+            if (ImGui::IsItemHovered()) {
+              ImGui::SetTooltip("When sky camera becomes invalid, automatically fall back to rasterization instead of causing vertex explosions.");
+            }
+            ImGui::Checkbox("Log Fallbacks", &RtxOptions::skyReprojectLogFallbacksObject());
+            if (ImGui::IsItemHovered()) {
+              ImGui::SetTooltip("Log when sky reprojection falls back to rasterization due to invalid sky camera.");
+            }
+            ImGui::Checkbox("Prevent Camera Conflicts", &RtxOptions::skyReprojectPreventCameraConflictsObject());
+            if (ImGui::IsItemHovered()) {
+              ImGui::SetTooltip("Prevent rendering conflicts when sky/main cameras load/unload by tracking camera signatures. Helps eliminate flicker during camera transitions.");
+            }
+            if (RtxOptions::skyReprojectPreventCameraConflicts()) {
+              ImGui::DragInt("Signature Memory (Frames)", reinterpret_cast<int*>(&RtxOptions::skyReprojectCameraSignatureFramesObject()), 1, 1, 60);
+              if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Number of frames to remember camera signatures for conflict detection. Higher values provide better conflict detection but use more memory.");
+              }
+            }
             ImGui::EndDisabled();
           }
           ImGui::DragFloat("Sky Auto-Detect Unique Camera Search Distance", &RtxOptions::skyAutoDetectUniqueCameraDistanceObject(), 1.0f, 0.1f, 1000.0f);

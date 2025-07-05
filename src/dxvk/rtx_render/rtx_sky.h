@@ -146,6 +146,9 @@ dxvk::RtxContext::TryHandleSkyResult dxvk::RtxContext::tryHandleSky(const DrawPa
                                                                     DrawCallState* originalDrawCallState) {
 
   if (originalParams && originalDrawCallState && originalDrawCallState->cameraType == CameraType::Sky) {
+    
+    // Update sky camera state - camera is active this frame
+    updateSkyCameraState();
 
     // Initialize the sky render targets
     {
@@ -171,6 +174,13 @@ dxvk::RtxContext::TryHandleSkyResult dxvk::RtxContext::tryHandleSky(const DrawPa
       if (isSkyboxQuad(*originalDrawCallState)) {
         return true;
       }
+      // NEW: Check if we should fallback to rasterization due to invalid sky camera
+      if (shouldFallbackToRasterization()) {
+        if (RtxOptions::skyReprojectLogFallbacks()) {
+          ONCE(Logger::info("[RTX-Sky] Falling back to rasterization due to invalid sky camera data"));
+        }
+        return true;
+      }
       return false;
     };
 
@@ -182,6 +192,12 @@ dxvk::RtxContext::TryHandleSkyResult dxvk::RtxContext::tryHandleSky(const DrawPa
     // But for 3D skybox (i.e. the objects that are rendered in sky camera space),
     // we would need to know the main camera to be able to reproject from sky to main camera space,
     // so delay ray traced logic until then
+    
+    // Store frame when sky geometry was first queued
+    if (m_delayedRayTracedSky.empty()) {
+      m_skyGeometryQueuedFrame = m_device->getCurrentFrameId();
+    }
+    
     m_delayedRayTracedSky.push_back(std::move(*originalDrawCallState));
     return TryHandleSkyResult::SkipSubmit;
   }
@@ -190,6 +206,50 @@ dxvk::RtxContext::TryHandleSkyResult dxvk::RtxContext::tryHandleSky(const DrawPa
   assert(!originalDrawCallState || originalDrawCallState->cameraType != CameraType::Sky);
 
   if (m_delayedRayTracedSky.empty()) {
+    return TryHandleSkyResult::Default;
+  }
+
+  // NEW: Check for stale sky camera and cleanup
+  cleanupStaleDelayedSkyGeometry();
+  if (m_delayedRayTracedSky.empty()) {
+    return TryHandleSkyResult::Default;
+  }
+
+  // NEW: Validate sky camera data before reprojection
+  bool hasValidSkyData = true;
+  for (const auto& skyGeometry : m_delayedRayTracedSky) {
+    if (!isSkyCameraDataValid(skyGeometry)) {
+      hasValidSkyData = false;
+      break;
+    }
+  }
+
+  if (!hasValidSkyData && RtxOptions::skyReprojectFallbackToRaster()) {
+    if (RtxOptions::skyReprojectLogFallbacks()) {
+      Logger::info("[RTX-Sky] Sky camera data invalid, rasterizing delayed sky geometry");
+    }
+    
+    // Rasterize all delayed sky geometry
+    for (auto& skyGeometry : m_delayedRayTracedSky) {
+      // Create temporary DrawParameters for rasterization
+      DrawParameters tempParams;
+      tempParams.vertexCount = skyGeometry.getGeometryData().vertexCount;
+      tempParams.indexCount = skyGeometry.getGeometryData().indexCount;
+      tempParams.instanceCount = 1;
+      tempParams.firstIndex = 0;
+      tempParams.vertexOffset = 0;
+      
+      rasterizeSky(tempParams, skyGeometry);
+    }
+    
+    m_delayedRayTracedSky.clear();
+    m_skyGeometryQueuedFrame = 0;
+    
+    // Reset camera signatures after fallback rasterization
+    if (RtxOptions::skyReprojectPreventCameraConflicts()) {
+      resetCameraSignatures();
+    }
+    
     return TryHandleSkyResult::Default;
   }
 
@@ -239,6 +299,12 @@ dxvk::RtxContext::TryHandleSkyResult dxvk::RtxContext::tryHandleSky(const DrawPa
     getSceneManager().submitDrawState(this, skyGeometry, nullptr);
   }
   m_delayedRayTracedSky.clear();
+  m_skyGeometryQueuedFrame = 0;
+  
+  // Reset camera signatures after successful sky processing
+  if (RtxOptions::skyReprojectPreventCameraConflicts()) {
+    resetCameraSignatures();
+  }
 
   // since 'originalDrawCallState' is not a sky (it just triggers delayed sky submit),
   // proceed with the default path

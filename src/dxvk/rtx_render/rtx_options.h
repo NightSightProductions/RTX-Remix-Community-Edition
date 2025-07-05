@@ -1069,6 +1069,20 @@ RTX_OPTION("rtx", std::string, legacyEmissiveColorsString, "",
                "Useful, if a game has a skybox that contains geometry that can be a part of the main scene (e.g. buildings, mountains). "
                "So with this option enabled, that geometry would be promoted from sky rasterization to ray tracing.");
     RTX_OPTION("rtx", float, skyReprojectScale, 16.0f, "Scaling of the sky geometry on reprojection to main camera space.");
+    RTX_OPTION("rtx", uint32_t, skyReprojectCameraTimeoutFrames, 60,
+               "Number of frames after which delayed sky geometry is discarded if sky camera becomes stale. "
+               "Set to 0 to disable timeout (not recommended as it may cause vertex explosions).");
+    RTX_OPTION("rtx", bool, skyReprojectFallbackToRaster, true,
+               "When sky camera becomes invalid, automatically fall back to rasterization instead of "
+               "causing vertex explosions. Disable to use legacy behavior.");
+    RTX_OPTION("rtx", bool, skyReprojectLogFallbacks, true,
+               "Log when sky reprojection falls back to rasterization due to invalid sky camera.");
+    RTX_OPTION("rtx", bool, skyReprojectPreventCameraConflicts, true,
+               "Prevent rendering conflicts when sky/main cameras load/unload by tracking camera signatures. "
+               "Helps eliminate flicker during camera transitions.");
+    RTX_OPTION("rtx", uint32_t, skyReprojectCameraSignatureFrames, 10,
+               "Number of frames to remember camera signatures for conflict detection. "
+               "Higher values provide better conflict detection but use more memory.");
 
     // TODO (REMIX-656): Remove this once we can transition content to new hash
     RTX_OPTION("rtx", bool, logLegacyHashReplacementMatches, false, "");
