@@ -184,7 +184,7 @@ namespace dxvk {
     {"playermodeltextures", "Player Model Texture (optional)", &RtxOptions::playerModelTexturesObject()},
     {"playermodelbodytextures", "Player Model Body Texture (optional)", &RtxOptions::playerModelBodyTexturesObject()},
     {"opacitymicromapignoretextures", "Opacity Micromap Ignore Texture (optional)", &RtxOptions::opacityMicromapIgnoreTexturesObject()},
-    {"ignorebakedlightingtextures","Ignore Baked Lighting Textures (optional)", &RtxOptions::ignoreBakedLightingTexturesObject()},
+    {"allowbakedlightingtextures","Allow Baked Lighting Textures (optional)", &RtxOptions::allowBakedLightingTexturesObject()},
     {"ignorealphaontextures","Ignore Alpha Channel of Textures (optional)", &RtxOptions::ignoreAlphaOnTexturesObject()},
     {"raytracedRenderTargetTextures","Raytraced Render Target Textures (optional)", &RtxOptions::raytracedRenderTargetTexturesObject(), ImGUI::kTextureFlagsRenderTarget},
     {"particleemittertextures","Particle Emitters (optional)", &RtxOptions::particleEmitterTexturesObject()}

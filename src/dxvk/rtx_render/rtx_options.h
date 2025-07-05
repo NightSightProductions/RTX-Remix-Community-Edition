@@ -255,19 +255,19 @@ namespace dxvk {
                   "Textures on draw calls to be treated as \"animated water\".\n"
                   "Objects with this flag applied will animate their normals to fake a basic water effect based on the layered water material parameters, and only when rtx.opaqueMaterial.layeredWaterNormalEnable is set to true.\n"
                   "Should typically be used on static water planes that the original application may have relied on shaders to animate water on.");
-    RTX_OPTION("rtx", fast_unordered_set, ignoreBakedLightingTextures, {},
-                  "Textures for which to ignore two types of baked lighting, Texture Factors and Vertex Color.\n\n"
-                  "Texture Factor disablement:\n"
-                  "Using this feature on selected textures will eliminate the texture factors.\n"
-                  "For instance, if a game bakes lighting information into the Texture Factor for particular textures, applying this option will remove them.\n"
-                  "This becomes useful when unexpected results occur due to the Texture Factor.\n"
-                  "Consider an example where the original texture contains red tints baked into the Texture Factor. If a user replaces the texture, it will blend with the red tints, resulting in an undesirable reddish outcome.\n"
-                  "In such cases, users can employ this option to eliminate the unwanted tints from their replacement textures.\n"
-                  "Similarly, users can tag textures if shadows are baked into the Texture Factor, causing the replacing texture to appear darker than anticipated.\n\n"
-                  "Vertex Color disablement:\n"
-                  "Using this feature on selected textures will eliminate the vertex colors.\n\n"
-                  "Note, enabling this setting will automatically disable multiple-stage texture factor blendings for the selected textures.\n"
-                  "Only use this option when necessary, as the Texture Factor and Vertex Color can be used for simulating various texture effects, tagging a texture with this option will unexpectedly eliminate these effects.");
+    RTX_OPTION("rtx", fast_unordered_set, allowBakedLightingTextures, {},
+                  "Textures for which to allow two types of baked lighting, Texture Factors and Vertex Color.\n\n"
+                  "By default, all textures have their baked lighting ignored to ensure proper ray-traced lighting. Only textures explicitly listed here will preserve their original baked lighting effects.\n\n"
+                  "Texture Factor enablement:\n"
+                  "Using this feature on selected textures will preserve the texture factors.\n"
+                  "For instance, if a game bakes lighting information into the Texture Factor for particular textures, applying this option will keep them.\n"
+                  "This becomes useful when you want to preserve specific lighting effects that are intentionally baked into the Texture Factor.\n"
+                  "Consider an example where the original texture contains intentional red tints baked into the Texture Factor that should be preserved for artistic reasons.\n"
+                  "Similarly, you can tag textures if shadows are intentionally baked into the Texture Factor and should remain.\n\n"
+                  "Vertex Color enablement:\n"
+                  "Using this feature on selected textures will preserve the vertex colors.\n\n"
+                  "Note, enabling this setting will automatically enable multiple-stage texture factor blendings for the selected textures.\n"
+                  "Only use this option when you specifically want to preserve the original game's lighting effects, as by default RTX Remix provides superior ray-traced lighting.");
     RTX_OPTION("rtx", fast_unordered_set, ignoreAlphaOnTextures, {}, 
                   "Textures for which to ignore the alpha channel of the legacy colormap. Textures will be rendered fully opaque as a result.");
     RTX_OPTION("rtx.antiCulling", fast_unordered_set, antiCullingTextures, {},

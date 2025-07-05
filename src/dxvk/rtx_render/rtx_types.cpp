@@ -308,7 +308,7 @@ namespace dxvk {
     setCategory(InstanceCategories::IgnoreMotionBlur, lookupHash(RtxOptions::motionBlurMaskOutTextures(), textureHash));
     setCategory(InstanceCategories::IgnoreOpacityMicromap, lookupHash(RtxOptions::opacityMicromapIgnoreTextures(), textureHash) || isUsingRaytracedRenderTarget);
     setCategory(InstanceCategories::IgnoreAlphaChannel, lookupHash(RtxOptions::ignoreAlphaOnTextures(), textureHash));
-    setCategory(InstanceCategories::IgnoreBakedLighting, lookupHash(RtxOptions::ignoreBakedLightingTextures(), textureHash));
+    setCategory(InstanceCategories::IgnoreBakedLighting, !lookupHash(RtxOptions::allowBakedLightingTextures(), textureHash));
 
     setCategory(InstanceCategories::Hidden, lookupHash(RtxOptions::hideInstanceTextures(), textureHash));
 
