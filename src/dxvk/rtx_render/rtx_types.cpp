@@ -308,7 +308,6 @@ namespace dxvk {
     setCategory(InstanceCategories::IgnoreMotionBlur, lookupHash(RtxOptions::motionBlurMaskOutTextures(), textureHash));
     setCategory(InstanceCategories::IgnoreOpacityMicromap, lookupHash(RtxOptions::opacityMicromapIgnoreTextures(), textureHash) || isUsingRaytracedRenderTarget);
     setCategory(InstanceCategories::IgnoreAlphaChannel, lookupHash(RtxOptions::ignoreAlphaOnTextures(), textureHash));
-    setCategory(InstanceCategories::IgnoreBakedLighting, !lookupHash(RtxOptions::allowBakedLightingTextures(), textureHash));
 
     setCategory(InstanceCategories::Hidden, lookupHash(RtxOptions::hideInstanceTextures(), textureHash));
 
@@ -330,6 +329,15 @@ namespace dxvk {
     setCategory(InstanceCategories::Sky, lookupHash(RtxOptions::skyBoxTextures(), textureHash));
 
     setCategory(InstanceCategories::ParticleEmitter, lookupHash(RtxOptions::particleEmitterTextures(), textureHash));
+
+    // Set baked lighting category - automatically allow baked lighting for decal textures
+    // since they need proper vertex color/weighting to blend correctly
+    const bool isDecalTexture = testCategoryFlags(DECAL_CATEGORY_FLAGS);
+    // Also automatically allow baked lighting for particle textures since they need proper vertex color/weighting for effects
+    const bool isParticleTexture = testCategoryFlags(InstanceCategories::Particle);
+    const bool isExplicitlyAllowed = lookupHash(RtxOptions::allowBakedLightingTextures(), textureHash);
+    
+    setCategory(InstanceCategories::IgnoreBakedLighting, !(isExplicitlyAllowed || isDecalTexture || isParticleTexture));
   }
 
   void DrawCallState::setupCategoriesForGeometry() {

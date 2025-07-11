@@ -253,9 +253,20 @@ namespace dxvk {
         break;
       case D3DDECLUSAGE_COLOR:
         if (element.UsageIndex == 0 &&
-            !RtxOptions::ignoreAllVertexColorBakedLighting() &&
-            lookupHash(RtxOptions::allowBakedLightingTextures(), m_activeDrawCallState.materialData.colorTextures[0].getImageHash())) {
-          targetBuffer = &geoData.color0Buffer;
+            !RtxOptions::ignoreAllVertexColorBakedLighting()) {
+          const XXH64_hash_t textureHash = m_activeDrawCallState.materialData.colorTextures[0].getImageHash();
+          // Allow vertex colors for textures explicitly in the allowBakedLightingTextures list
+          const bool isExplicitlyAllowed = lookupHash(RtxOptions::allowBakedLightingTextures(), textureHash);
+          // Also allow vertex colors for decal textures since they need proper vertex color/weighting for blending
+          const bool isDecalTexture = lookupHash(RtxOptions::decalTextures(), textureHash) ||
+                                      lookupHash(RtxOptions::dynamicDecalTextures(), textureHash) ||
+                                      lookupHash(RtxOptions::singleOffsetDecalTextures(), textureHash) ||
+                                      lookupHash(RtxOptions::nonOffsetDecalTextures(), textureHash);
+          // Also allow vertex colors for particle textures since they need proper vertex color/weighting for effects
+          const bool isParticleTexture = lookupHash(RtxOptions::particleTextures(), textureHash);
+          if (isExplicitlyAllowed || isDecalTexture || isParticleTexture) {
+            targetBuffer = &geoData.color0Buffer;
+          }
         }
         break;
       }
@@ -971,10 +982,20 @@ namespace dxvk {
         }
 
         // Check if texture factor blending is enabled
-        if (isCurrentStageTextureFactorBlendingEnabled &&
-            !lookupHash(RtxOptions::allowBakedLightingTextures(), texHash)) {
-          useStageTextureFactorBlending = false;
-          useMultipleStageTextureFactorBlending = false;
+        if (isCurrentStageTextureFactorBlendingEnabled) {
+          // Allow texture factor blending for textures explicitly in the allowBakedLightingTextures list
+          const bool isExplicitlyAllowed = lookupHash(RtxOptions::allowBakedLightingTextures(), texHash);
+          // Also allow texture factor blending for decal textures since they need proper blending
+          const bool isDecalTexture = lookupHash(RtxOptions::decalTextures(), texHash) ||
+                                      lookupHash(RtxOptions::dynamicDecalTextures(), texHash) ||
+                                      lookupHash(RtxOptions::singleOffsetDecalTextures(), texHash) ||
+                                      lookupHash(RtxOptions::nonOffsetDecalTextures(), texHash);
+          // Also allow texture factor blending for particle textures since they need proper blending
+          const bool isParticleTexture = lookupHash(RtxOptions::particleTextures(), texHash);
+          if (!(isExplicitlyAllowed || isDecalTexture || isParticleTexture)) {
+            useStageTextureFactorBlending = false;
+            useMultipleStageTextureFactorBlending = false;
+          }
         }
       }
     }
