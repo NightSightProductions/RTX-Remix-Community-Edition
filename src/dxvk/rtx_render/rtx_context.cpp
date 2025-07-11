@@ -1647,24 +1647,46 @@ namespace dxvk {
       getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER),
       rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion);
 
+    // Check if HDR is enabled
+    const bool hdrEnabled = isHDREnabled();
+    
     // We don't reset history for tonemapper on m_resetHistory for easier comparison when toggling raytracing modes.
     // The tone curve shouldn't be too different between raytracing modes, 
     // but the reset of denoised buffers causes wide tone curve differences
     // until it converges and thus making comparison of raytracing mode outputs more difficult
     setFramePassStage(RtxFramePassStage::ToneMapping);
-    if (RtxOptions::tonemappingMode() == TonemappingMode::Global) {
+    
+    if (hdrEnabled) {
+      // HDR Mode: Use native HDR processing (bypass SDR tone mapping entirely)
       DxvkToneMapping& toneMapper = m_common->metaToneMapping();
-      toneMapper.dispatch(this, 
+      
+      // Apply HDR processing directly to the composite output
+      toneMapper.dispatchHDRProcessing(this,
         getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER),
         autoExposure.getExposureTexture().view,
-        rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion, autoExposure.enabled());
-    }
-    DxvkLocalToneMapping& localTonemapper = m_common->metaLocalToneMapping();
-    if (localTonemapper.isActive()) {
-      localTonemapper.dispatch(this,
-        getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
-        autoExposure.getExposureTexture().view,
-        rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion, autoExposure.enabled());
+        rtOutput.m_finalOutput.resource(Resources::AccessType::Read),
+        rtOutput.m_finalOutput.resource(Resources::AccessType::Write),
+        GlobalTime::get().deltaTimeMs(),
+        autoExposure.enabled());
+    } else {
+      // SDR Mode: Apply the selected tonemapping mode
+      if (RtxOptions::tonemappingMode() == TonemappingMode::Global) {
+        DxvkToneMapping& toneMapper = m_common->metaToneMapping();
+        
+        toneMapper.dispatch(this, 
+          getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER),
+          autoExposure.getExposureTexture().view,
+          rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion, autoExposure.enabled());
+      } else {
+        // Local tonemapping mode
+        DxvkLocalToneMapping& localTonemapper = m_common->metaLocalToneMapping();
+        if (localTonemapper.isActive()) {
+          localTonemapper.dispatch(this,
+            getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
+            autoExposure.getExposureTexture().view,
+            rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion, autoExposure.enabled());
+        }
+      }
     }
   }
 
@@ -2821,4 +2843,110 @@ namespace dxvk {
     Resources::s_aliasingAnalyzerResultText = !availableAliasingText.empty() ? availableAliasingText : "Can't find any resources that can be aliased.\n";
   }
 #endif
+
+  // HDR Support Methods Implementation
+  bool RtxContext::isHDREnabled() const {
+    // Check if HDR is enabled in tonemapping settings
+    return m_common->metaToneMapping().enableHDR();
+  }
+
+  bool RtxContext::isUITexture(const DrawCallState& drawCallState) const {
+    if (!m_common->metaComposite().detectUITextures()) {
+      return false;
+    }
+
+    const auto& transformData = drawCallState.getTransformData();
+    const Matrix4& viewToProj = transformData.viewToProjection;
+    const Matrix4& worldToView = transformData.worldToView;
+    const Matrix4& objectToWorld = transformData.objectToWorld;
+    
+    // Check for orthographic projection matrix
+    // In orthographic projection, the W component of the 4th row should be 0
+    // In perspective projection, it should be -1 (or 1 depending on convention)
+    const float w_component = viewToProj[3][2];
+    const bool isOrthographic = std::abs(w_component) < 0.001f;
+
+    // Additional heuristics for UI detection
+    if (isOrthographic) {
+      // Check if the geometry is screen-aligned (typical for UI)
+      // UI elements often have minimal rotation (identity-like view matrix)
+      const bool isScreenAligned = (
+        std::abs(worldToView[0][1]) < 0.1f && std::abs(worldToView[0][2]) < 0.1f &&
+        std::abs(worldToView[1][0]) < 0.1f && std::abs(worldToView[1][2]) < 0.1f &&
+        std::abs(worldToView[2][0]) < 0.1f && std::abs(worldToView[2][1]) < 0.1f
+      );
+
+      // Check for 2D-like transformations (no Z scaling/rotation)
+      const float zScale = std::abs(objectToWorld[2][2]);
+      const bool is2DLike = (zScale > 0.99f && zScale < 1.01f);
+      
+      // Check if the projection matrix has typical UI characteristics
+      // UI projections often have simpler, more uniform scaling
+      const float xScale = std::abs(viewToProj[0][0]);
+      const float yScale = std::abs(viewToProj[1][1]);
+      const bool hasUniformScaling = (std::abs(xScale - yScale) < 0.1f);
+      
+      // Check for near/far plane characteristics typical of UI
+      // UI often uses a very simple depth range
+      const float nearPlane = viewToProj[2][3] / (viewToProj[2][2] - 1.0f);
+      const float farPlane = viewToProj[2][3] / (viewToProj[2][2] + 1.0f);
+      const bool hasUIDepthRange = (nearPlane >= -1.1f && farPlane <= 1.1f);
+      
+      // Additional check: UI elements often have identity or simple world transforms
+      const bool hasSimpleWorldTransform = (
+        std::abs(objectToWorld[0][0] - 1.0f) < 0.1f &&
+        std::abs(objectToWorld[1][1] - 1.0f) < 0.1f &&
+        std::abs(objectToWorld[2][2] - 1.0f) < 0.1f &&
+        std::abs(objectToWorld[0][1]) < 0.1f && std::abs(objectToWorld[0][2]) < 0.1f &&
+        std::abs(objectToWorld[1][0]) < 0.1f && std::abs(objectToWorld[1][2]) < 0.1f &&
+        std::abs(objectToWorld[2][0]) < 0.1f && std::abs(objectToWorld[2][1]) < 0.1f
+      );
+
+      // Weight the different heuristics
+      int uiScore = 0;
+      if (isScreenAligned) uiScore += 3;
+      if (is2DLike) uiScore += 2;
+      if (hasUniformScaling) uiScore += 1;
+      if (hasUIDepthRange) uiScore += 1;
+      if (hasSimpleWorldTransform) uiScore += 2;
+      
+      // Threshold for considering something UI (out of 9 possible points)
+      return uiScore >= 4;
+    }
+    
+    // Check for perspective projections that might still be UI (rare but possible)
+    // Some UI systems use perspective projection with very specific characteristics
+    if (!isOrthographic) {
+      // Look for very wide FOV or unusual perspective characteristics that suggest UI
+      const float fovIndicator = std::abs(viewToProj[1][1]);
+      const bool hasUILikePerspective = (fovIndicator < 0.5f); // Very wide FOV
+      
+      // Check if geometry is still screen-aligned despite perspective projection
+      const bool isScreenAligned = (
+        std::abs(worldToView[0][1]) < 0.05f && std::abs(worldToView[0][2]) < 0.05f &&
+        std::abs(worldToView[1][0]) < 0.05f && std::abs(worldToView[1][2]) < 0.05f &&
+        std::abs(worldToView[2][0]) < 0.05f && std::abs(worldToView[2][1]) < 0.05f
+      );
+      
+      // Only consider perspective as UI if it has very strong UI characteristics
+      return hasUILikePerspective && isScreenAligned;
+    }
+
+    return false;
+  }
+
+  void RtxContext::processHDROutput(const Resources::RaytracingOutput& rtOutput) {
+    ScopedGpuProfileZone(this, "HDR Output Processing");
+    
+    // HDR output processing would involve:
+    // 1. Ensuring proper color space conversion for HDR displays
+    // 2. Applying HDR metadata
+    // 3. Handling UI brightness separately
+    
+    // For now, this is a placeholder for future HDR swapchain integration
+    // The actual HDR swapchain creation and presentation would need to be 
+    // implemented in the presentation layer (outside of this RTX context)
+    
+    Logger::debug("HDR output processing completed");
+  }
 } // namespace dxvk

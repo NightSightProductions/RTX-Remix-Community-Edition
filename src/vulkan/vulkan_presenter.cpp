@@ -652,6 +652,83 @@ namespace dxvk::vk {
     m_vki->vkDestroySurfaceKHR(m_vki->instance(), m_surface, nullptr);
   }
 
+
+  void Presenter::setHdrMetadata(
+          bool      hdrEnabled,
+          uint32_t  hdrFormat,
+          float     maxLuminance,
+          float     minLuminance,
+          float     paperWhiteLuminance) {
+    // Only set HDR metadata if HDR is enabled and we have a valid swapchain
+    if (!hdrEnabled || !m_swapchain) {
+      return;
+    }
+
+    #ifdef VK_EXT_hdr_metadata
+    // Check if the extension is available
+    if (!m_vkd->vkSetHdrMetadataEXT) {
+      Logger::warn("Presenter: vkSetHdrMetadataEXT not available, HDR metadata not set");
+      return;
+    }
+
+    VkHdrMetadataEXT hdrMetadata = {};
+    hdrMetadata.sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT;
+    hdrMetadata.pNext = nullptr;
+
+    // ST2086 Static Metadata for HDR displays
+    // Display primaries in CIE 1931 xy chromaticity coordinates
+    // These are the standard Rec.2020 primaries used by HDR displays
+    
+    // Red primary (x, y)
+    hdrMetadata.displayPrimaryRed.x = 0.708f;   // Rec.2020 red x
+    hdrMetadata.displayPrimaryRed.y = 0.292f;   // Rec.2020 red y
+    
+    // Green primary (x, y)
+    hdrMetadata.displayPrimaryGreen.x = 0.170f; // Rec.2020 green x
+    hdrMetadata.displayPrimaryGreen.y = 0.797f; // Rec.2020 green y
+    
+    // Blue primary (x, y)
+    hdrMetadata.displayPrimaryBlue.x = 0.131f;  // Rec.2020 blue x
+    hdrMetadata.displayPrimaryBlue.y = 0.046f;  // Rec.2020 blue y
+    
+    // White point (x, y) - D65 illuminant used in Rec.2020
+    hdrMetadata.whitePoint.x = 0.3127f;         // D65 white point x
+    hdrMetadata.whitePoint.y = 0.3290f;         // D65 white point y
+    
+    // Luminance values (in nits)
+    hdrMetadata.maxLuminance = maxLuminance;              // Peak brightness of the display
+    hdrMetadata.minLuminance = minLuminance;              // Minimum black level
+    
+    // Content light levels (based on our HDR processing settings)
+    // MaxCLL (Maximum Content Light Level) - peak brightness of the content
+    hdrMetadata.maxContentLightLevel = static_cast<uint16_t>(maxLuminance);
+    
+    // MaxFALL (Maximum Frame Average Light Level) - typically 25-50% of MaxCLL
+    // Using paper white as a reasonable estimate for average content brightness
+    hdrMetadata.maxFrameAverageLightLevel = static_cast<uint16_t>(paperWhiteLuminance);
+
+    // Set the HDR metadata for our swapchain
+    // Note: vkSetHdrMetadataEXT returns void, not VkResult
+    m_vkd->vkSetHdrMetadataEXT(
+      m_vkd->device(),
+      1,                    // swapchainCount
+      &m_swapchain,        // pSwapchains
+      &hdrMetadata         // pMetadata
+    );
+
+    Logger::info(str::format(
+      "Presenter: HDR metadata set successfully"
+      "\n  Format: ", (hdrFormat == 1 ? "PQ/HDR10" : hdrFormat == 2 ? "HLG" : "Linear"),
+      "\n  Max Luminance: ", maxLuminance, " nits",
+      "\n  Min Luminance: ", minLuminance, " nits",
+      "\n  Paper White: ", paperWhiteLuminance, " nits",
+      "\n  MaxCLL: ", hdrMetadata.maxContentLightLevel, " nits",
+      "\n  MaxFALL: ", hdrMetadata.maxFrameAverageLightLevel, " nits"));
+    #else
+    Logger::warn("Presenter: VK_EXT_hdr_metadata not supported at compile time");
+    #endif
+  }
+
   // NV-DXVK start: App Controlled FSE
   VkResult Presenter::acquireFullscreenExclusive() {
     if (!m_info.appOwnedFSE)

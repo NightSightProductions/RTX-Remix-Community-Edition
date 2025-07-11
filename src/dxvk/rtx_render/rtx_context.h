@@ -125,6 +125,11 @@ namespace dxvk {
 
     void bindCommonRayTracingResources(const Resources::RaytracingOutput& rtOutput);
 
+    // HDR Support methods
+    bool isHDREnabled() const;
+    bool isUITexture(const DrawCallState& drawCallState) const;
+    void processHDROutput(const Resources::RaytracingOutput& rtOutput);
+
     void bindResourceView(const uint32_t slot, const Rc<DxvkImageView>& imageView, const Rc<DxvkBufferView>& bufferView);
 
     void getDenoiseArgs(NrdArgs& outPrimaryDirectNrdArgs, NrdArgs& outPrimaryIndirectNrdArgs, NrdArgs& outSecondaryNrdArgs);

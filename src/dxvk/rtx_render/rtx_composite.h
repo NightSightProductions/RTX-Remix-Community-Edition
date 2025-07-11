@@ -125,5 +125,10 @@ namespace dxvk {
     RTX_OPTION("rtx", EnhancementMode, dlssEnhancementMode, EnhancementMode::NormalDifference,
       "The enhancement filter type. Valid values: <Normal Difference=1, Laplacian=0>. Normal difference mode provides more normal detail at the cost of some noise. Laplacian mode is less aggressive.");
     RTX_OPTION("rtx", float, pixelHighlightReuseStrength, 0.5, "The specular portion when we reuse last frame's pixel value.");
+    
+    // HDR and UI Options
+    RTX_OPTION("rtx", bool, detectUITextures, true, "Automatically detect UI textures based on orthographic projection matrices and apply separate brightness control.");
+    RTX_OPTION("rtx", float, hdrUIBrightness, 1.0f, "Brightness multiplier for UI elements in HDR mode. Range [0.1, 5.0].");
+    RTX_OPTION("rtx", bool, separateUIProcessing, true, "Process UI elements separately from scene content for HDR output.");
   };
 } // namespace dxvk

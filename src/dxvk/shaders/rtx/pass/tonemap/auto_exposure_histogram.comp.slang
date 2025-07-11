@@ -34,7 +34,15 @@ groupshared uint g_localData[EXPOSURE_HISTOGRAM_SIZE];
 
 uint inputToHistogramBucket(const float3 inputColor)
 {
-  const float inputLuminance = calcBt709Luminance(inputColor);
+  float inputLuminance = calcBt709Luminance(inputColor);
+
+  // Auto exposure reads from the composite buffer which contains relative [0,1] HDR values
+  // These values are already properly scaled for EV calculation, so we don't need additional scaling
+  // Note: The original EV100 calculation assumes luminance in cd/m² (nits), but the composite buffer
+  // values are in a relative range where typical scene values work correctly with the EV ranges
+  
+  // For both HDR and SDR, the input values are in a consistent relative range
+  // No additional scaling needed as the EV min/max ranges handle the dynamic range
 
   // Count nearly black pixels in the 0th bucket
   const float kEpsilon = 0.00001f;

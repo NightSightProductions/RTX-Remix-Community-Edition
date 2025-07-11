@@ -3884,6 +3884,56 @@ namespace dxvk {
       {
         ImGui::SliderInt("User Brightness", &RtxOptions::userBrightnessObject(), 0, 100, "%d");
         ImGui::DragFloat("User Brightness EV Range", &RtxOptions::userBrightnessEVRangeObject(), 0.5f, 0.f, 10.f, "%.1f");
+        
+        // HDR Display Settings (always visible regardless of tonemapping mode)
+        ImGui::Separator();
+        ImGui::Text("HDR Display Settings");
+        ImGui::Checkbox("Enable HDR Output", &common->metaToneMapping().enableHDRObject());
+        
+        if (common->metaToneMapping().enableHDR()) {
+          ImGui::Indent();
+          
+          // HDR Format Selection
+          const char* hdrFormats[] = { "Linear (Compatibility)", "PQ/HDR10 (Most Displays)", "HLG (Broadcast)" };
+          ImGui::Combo("HDR Format", &common->metaToneMapping().hdrFormatObject(), hdrFormats, IM_ARRAYSIZE(hdrFormats));
+          ImGui::Separator();
+          
+          // HDR Tone Mapping
+          ImGui::Text("HDR Tone Mapping");
+          const char* hdrToneMappers[] = { "None (Linear)", "ACES HDR" };
+          ImGui::Combo("HDR Tone Mapper", &common->metaToneMapping().hdrToneMapperObject(), hdrToneMappers, IM_ARRAYSIZE(hdrToneMappers));
+          ImGui::Checkbox("Enable HDR Dithering", &common->metaToneMapping().hdrEnableDitheringObject());
+          if (common->metaToneMapping().hdrEnableDithering()) {
+            ImGui::Indent();
+            ImGui::DragFloat("Blue Noise Amplitude", &common->metaToneMapping().hdrBlueNoiseAmplitudeObject(), 0.01f, 0.0f, 1000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemHovered()) {
+              ImGui::SetTooltip("Multiplier for blue noise dithering strength.\n1.0 = optimal for reducing banding\n0.0 = no dithering\n>1.0 = stronger dithering for testing");
+            }
+            ImGui::Unindent();
+          }
+          ImGui::Separator();
+          
+          // HDR Brightness Controls
+          ImGui::Text("HDR Brightness Controls");
+          ImGui::DragFloat("HDR Exposure Bias (EV)", &common->metaToneMapping().hdrExposureBiasObject(), 0.01f, -3.0f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("HDR Brightness", &common->metaToneMapping().hdrBrightnessObject(), 0.01f, 0.1f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::Separator();
+          
+          // HDR Color Grading
+          ImGui::Text("HDR Color Grading");
+          ImGui::DragFloat("HDR Shadows", &common->metaToneMapping().hdrShadowsObject(), 0.01f, -1.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("HDR Midtones", &common->metaToneMapping().hdrMidtonesObject(), 0.01f, -1.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("HDR Highlights", &common->metaToneMapping().hdrHighlightsObject(), 0.01f, -1.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::Separator();
+          
+          ImGui::DragFloat("HDR Max Luminance (nits)", &common->metaToneMapping().hdrMaxLuminanceObject(), 10.0f, 100.0f, 10000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("HDR Min Luminance (nits)", &common->metaToneMapping().hdrMinLuminanceObject(), 0.000f, 0.000f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("Paper White Luminance (nits)", &common->metaToneMapping().hdrPaperWhiteLuminanceObject(), 1.0f, 80.0f, 400.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("UI Brightness", &common->metaToneMapping().uiBrightnessObject(), 0.01f, 0.1f, 5.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::Checkbox("Scene Referred Workflow", &common->metaToneMapping().hdrUseSceneReferredObject());
+          ImGui::Unindent();
+        }
+        
         ImGui::Separator();
         ImGui::Combo("Tonemapping Mode", &RtxOptions::tonemappingModeObject(), "Global\0Local\0");
         if (RtxOptions::tonemappingMode() == TonemappingMode::Global) {
