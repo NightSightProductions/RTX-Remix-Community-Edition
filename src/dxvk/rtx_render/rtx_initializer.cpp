@@ -64,7 +64,7 @@ namespace dxvk {
 
       RtxOptions::updateUpscalerFromDlssPreset();
       RtxOptions::updateGraphicsPresets(m_device);
-      RtxOptions::updateRaytraceModePresets(deviceInfo.core.properties.vendorID, deviceInfo.khrDeviceDriverProperties.driverID);
+      RtxOptions::updateRaytraceModePresets(deviceInfo.core.properties.vendorID, deviceInfo.core.properties.deviceID, deviceInfo.khrDeviceDriverProperties.driverID);
     } else {
       // Default, init to custom unless otherwise specified
       if (RtxOptions::graphicsPreset() == GraphicsPreset::Auto) {

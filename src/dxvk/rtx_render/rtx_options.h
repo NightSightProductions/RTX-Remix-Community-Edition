@@ -1268,7 +1268,7 @@ namespace dxvk {
     static void updateGraphicsPresets(DxvkDevice* device);
     static void updateLightingSetting();
     static void updatePathTracerPreset(PathTracerPreset preset);
-    static void updateRaytraceModePresets(const uint32_t vendorID, const VkDriverId driverID);
+    static void updateRaytraceModePresets(const uint32_t vendorID, const uint32_t deviceID, const VkDriverId driverID);
 
     static void resetUpscaler();
 

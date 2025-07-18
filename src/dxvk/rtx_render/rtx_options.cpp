@@ -479,7 +479,7 @@ namespace dxvk {
     updateLightingSetting();
   }
 
-  void RtxOptions::updateRaytraceModePresets(const uint32_t vendorID, const VkDriverId driverID) {
+  void RtxOptions::updateRaytraceModePresets(const uint32_t vendorID, const uint32_t deviceID, const VkDriverId driverID) {
     // Handle Automatic Raytrace Mode Preset (From configuration/default)
 
     if (RtxOptions::raytraceModePreset() == RaytraceModePreset::Auto) {
@@ -493,14 +493,17 @@ namespace dxvk {
       preferredGBufferRaytraceMode = DxvkPathtracerGbuffer::RaytraceMode::RayQuery;
       preferredIntegrateDirectRaytraceMode = DxvkPathtracerIntegrateDirect::RaytraceMode::RayQuery;
 
-      if (vendorID == static_cast<uint32_t>(DxvkGpuVendor::Nvidia) || driverID == VK_DRIVER_ID_MESA_RADV) {
-        // Default to a mixture of Trace Ray and Ray Query on NVIDIA and RADV
-        if (driverID == VK_DRIVER_ID_MESA_RADV) {
-          Logger::info("RADV driver detected, setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)");
-        } else {
-          Logger::info("NVIDIA architecture detected, setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)");
-        }
-
+      if (deviceID == 0x7550) {
+        // RDNA4 specific settings
+        Logger::info("RDNA4 architecture detected (device ID 0x7550), setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)");
+        preferredIntegrateIndirectRaytraceMode = DxvkPathtracerIntegrateIndirect::RaytraceMode::TraceRay;
+      } else if (vendorID == static_cast<uint32_t>(DxvkGpuVendor::Nvidia)) {
+        // Default to a mixture of Trace Ray and Ray Query on NVIDIA
+        Logger::info("NVIDIA architecture detected, setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)");
+        preferredIntegrateIndirectRaytraceMode = DxvkPathtracerIntegrateIndirect::RaytraceMode::TraceRay;
+      } else if (driverID == VK_DRIVER_ID_MESA_RADV) {
+        // Default to a mixture of Trace Ray and Ray Query on RADV (but not RDNA4 which is handled above)
+        Logger::info("RADV driver detected, setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)");
         preferredIntegrateIndirectRaytraceMode = DxvkPathtracerIntegrateIndirect::RaytraceMode::TraceRay;
       } else {
         // Default to Ray Query on AMD/Intel
