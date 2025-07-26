@@ -1084,27 +1084,42 @@ namespace dxvk {
       m_windowWidth = ImGui::GetWindowWidth();
     }
 
+    ImGui::Dummy(ImVec2(0, 2));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, 2));
+
     ImGui::Checkbox("Save Changed Settings Only", &RtxOptions::serializeChangedOptionOnlyObject());
-    if (ImGui::Button("Save Settings")) {
+
+    const float buttonWidth = ImGui::GetContentRegionAvail().x / 3 - (ImGui::GetStyle().ItemSpacing.x);
+
+    if (ImGui::Button("Save Settings", ImVec2(buttonWidth, 0))) {
       RtxOptions::serialize();
     }
     ImGui::SetTooltipToLastWidgetOnHover("This will save above settings in the rtx.conf file. Some may only take effect on next launch.");
 
     ImGui::SameLine();
-    if (ImGui::Button("Reset Settings")) {
+    if (ImGui::Button("Reset Settings", ImVec2(buttonWidth, 0))) {
       RtxOptions::reset();
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("Hide UI")) {
+    if (ImGui::Button("Hide UI", ImVec2(buttonWidth, 0))) {
       switchUI = (int) UIType::None;
     }
-    ImGui::Text("Alt + Del: toggle cursor");
-    ImGui::SameLine();
-    ImGui::Text("Alt + Backspace: toggle game input");
+
+    {
+      const char* inputHintText = "[Alt + Del] Toggle cursor        [Alt + Backspace] Toggle game input";
+      ImVec2 screenCursorPos = ImGui::GetCursorScreenPos();
+      screenCursorPos.x += (ImGui::GetWindowSize().x - ImGui::CalcTextSize(inputHintText).x) * 0.5f - 4.0f;
+      screenCursorPos.y += 2.0f;
+
+      ImGui::GetWindowDrawList()->AddText(ImGui::GetIO().FontDefault, 16.0f, screenCursorPos, ImGui::GetColorU32(ImGuiCol_Text), inputHintText);
+      ImGui::Dummy(ImVec2(0, 13));
+    }
+    
     ImGui::End();
 
-    // close via top-right close button
+    // Close via titlebar close button
     if (!advancedMenuOpen) {
       switchUI = (int) UIType::None;
     }
@@ -1126,18 +1141,28 @@ namespace dxvk {
       ImGui::OpenPopup(m_userGraphicsWindowTitle);
     }
 
-    ImGui::SetNextWindowPos(ImVec2(viewport->Size.x * 0.5 - m_userWindowWidth * 0.5, viewport->Size.y * 0.5 - m_userWindowHeight * 0.5));
+    ImGui::SetNextWindowPos(ImVec2(viewport->Size.x * 0.5f - m_userWindowWidth * 0.5f, viewport->Size.y * 0.5f - m_userWindowHeight * 0.5f));
     ImGui::SetNextWindowSize(ImVec2(m_userWindowWidth, 0));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(m_userWindowWidth, 0), ImVec2(m_userWindowWidth, m_userWindowHeight));
 
     // Note: When changing this padding consider:
     // - Checking to ensure text including less visible instances from hover tooltips and etc do not take up more
     // lines such that empty text lines become ineffective (to prevent jittering when text changes).
     // - Updating Dummy elements as they currently are based on half the y padding for spacing consistency.
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(74, 10));
+    const float windowPaddingX = 74.0f;
+    const float windowPaddingHalfX = windowPaddingX * 0.5f;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(windowPaddingX, 10));
+
+    // use same background color and alpha as other menus, PopupBg has alpha 1 because it's used for combobox popups etc. 
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
+    bool pushedPopupBg = true;
 
     bool basicMenuOpen = RtxOptions::showUI() == UIType::Basic;
-
     if (ImGui::BeginPopupModal(m_userGraphicsWindowTitle, &basicMenuOpen, ImGuiWindowFlags_AlwaysAutoResize)) {
+      // Restore PopupBg
+      ImGui::PopStyleColor();
+      pushedPopupBg = false;
+
       // Always display memory stats to user.
       showMemoryStats();
 
@@ -1145,8 +1170,7 @@ namespace dxvk {
       const int subItemWidth = 120;
       constexpr int subItemIndent = (itemWidth > subItemWidth) ? (itemWidth - subItemWidth) : 0;
 
-      ImGui::PushItemWidth(itemWidth);
-
+      const ImVec2 childSize = ImVec2(ImGui::GetContentRegionAvail().x + windowPaddingX, m_userWindowHeight * 0.63f);
       const static ImGuiTabBarFlags tab_bar_flags = ImGuiTabBarFlags_NoCloseWithMiddleMouseButton;
       const static ImGuiTabItemFlags tab_item_flags = ImGuiTabItemFlags_NoCloseWithMiddleMouseButton;
 
@@ -1156,64 +1180,95 @@ namespace dxvk {
         ImGui::Dummy({ 0.f, 4.f });
       }
 
+      ImGui::PopStyleVar();
+
+      auto beginTabChild = [&windowPaddingHalfX, &childSize, &itemWidth](const char* tabID) -> void {
+        // Make child window start at the same X offset as the tab bar separator
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() - windowPaddingHalfX);
+
+        // Make widgets within the child start at the same X offset as widgets outside of the child
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(windowPaddingHalfX, 10));
+        ImGui::BeginChild(tabID, childSize, true);
+
+        ImGui::PushItemWidth(static_cast<float>(itemWidth));
+        };
+
+      auto endTabChild = []() -> void {
+        ImGui::PopItemWidth();
+        ImGui::PopStyleVar();
+        ImGui::EndChild();
+        };
+
+
       if (ImGui::BeginTabBar("Settings Tabs", tab_bar_flags)) {
         if (ImGui::BeginTabItem("General", nullptr, tab_item_flags)) {
+          beginTabChild("##tab_child_general");
           showUserGeneralSettings(ctx, subItemWidth, subItemIndent);
-
+          endTabChild();
           ImGui::EndTabItem();
         }
 
         if (ImGui::BeginTabItem("Graphics", nullptr, tab_item_flags)) {
+          beginTabChild("##tab_child_graphics");
           showUserRenderingSettings(ctx, subItemWidth, subItemIndent);
-
+          endTabChild();
           ImGui::EndTabItem();
         }
 
         if (ImGui::BeginTabItem("Content", nullptr, tab_item_flags)) {
+          beginTabChild("##tab_child_content");
           showUserContentSettings(ctx, subItemWidth, subItemIndent);
-
+          endTabChild();
           ImGui::EndTabItem();
         }
 
         ImGui::EndTabBar();
       }
 
-      ImGui::Separator();
-      ImGui::Dummy(ImVec2(0.0f, 5.0f));
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(windowPaddingHalfX, 10));
+      ImGui::Dummy(ImVec2(0.0f, 0.0f));
 
       // Center align 
-      const float buttonWidth = 170;
-      const float width = ImGui::GetWindowSize().x;
-      ImGui::SetCursorPosX((width - (buttonWidth * 3)) / 2);
+      const ImVec2 buttonSize = ImVec2((ImGui::GetWindowSize().x - windowPaddingX) / 2, 36);
 
-      if (ImGui::Button("Developer Settings Menu", ImVec2(buttonWidth, 0))) {
+      // Make child window start at X offset of tab bar separator
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() - windowPaddingHalfX);
+
+      if (ImGui::Button("Developer Settings Menu", buttonSize)) {
         switchMenu(UIType::Advanced);
       }
 
       ImGui::SameLine();
 
-      if (ImGui::Button("Save Settings", ImVec2(buttonWidth, 0))) {
+      const bool unsavedChanges = m_userGraphicsSettingChanged;
+      if (unsavedChanges) {
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.35f, 0.14f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.78f, 0.43f, 0.22f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::GetStyle().Colors[ImGuiCol_ButtonHovered]);
+      }
+
+      if (ImGui::Button("Save Settings", buttonSize)) {
         RtxOptions::serialize();
         m_userGraphicsSettingChanged = false;
       }
 
-      ImGui::SetTooltipToLastWidgetOnHover("This will save above settings in the rtx.conf file. Some may only take effect on next launch.");
-
-      ImGui::SameLine();
-
-      if (ImGui::Button("Close", ImVec2(buttonWidth, 0))) {
-        switchMenu(UIType::None);
+      if (unsavedChanges) {
+        ImGui::PopStyleColor(3);
+        ImGui::SetTooltipToLastWidgetOnHover("Settings have been changed!\nThis will save settings in the rtx.conf file.\nSome may only take effect on next launch.");
+      }
+      else {
+        ImGui::SetTooltipToLastWidgetOnHover("This will save above settings in the rtx.conf file.\nSome may only take effect on next launch.");
       }
 
-      if (m_userGraphicsSettingChanged) {
-        ImGui::TextWrapped("Settings have been changed, click 'Save Settings' to save them and persist on next launch");
-      }
-
-      ImGui::PopItemWidth();
       ImGui::EndPopup();
     }
 
-    // close via top-right close button
+    if (pushedPopupBg) {
+      ImGui::PopStyleColor();
+    }
+
+    // Close via titlebar close button
     if (!basicMenuOpen) {
       switchMenu(UIType::None);
     }
@@ -1276,6 +1331,7 @@ namespace dxvk {
 
     // Upscaling Settings
 
+    ImGui::Dummy(ImVec2(0.0f, 3.0f));
     ImGui::TextSeparator("Upscaling Settings");
 
     {
@@ -1364,11 +1420,13 @@ namespace dxvk {
 
     // Latency Reduction Settings
     if (dlfgSupported) {
+      ImGui::Dummy(ImVec2(0.0f, 3.0f));
       ImGui::TextSeparator("Frame Generation Settings");
       showDLFGOptions(ctx);
     }
 
     if (reflexInitialized) {
+      ImGui::Dummy(ImVec2(0.0f, 3.0f));
       ImGui::TextSeparator("Latency Reduction Settings");
 
       {
@@ -1420,6 +1478,7 @@ namespace dxvk {
 
     // Path Tracing Settings
 
+    ImGui::Dummy(ImVec2(0.0f, 3.0f));
     ImGui::TextSeparator("Path Tracing Settings");
 
     {
@@ -1457,6 +1516,7 @@ namespace dxvk {
 
     // Volumetrics Settings
 
+    ImGui::Dummy(ImVec2(0.0f, 3.0f));
     ImGui::TextSeparator("RTX Volumetrics Settings");
     {
       m_userGraphicsSettingChanged |= ImGui::Checkbox("Enable Volumetric Lighting", &RtxGlobalVolumetrics::enableObject());
@@ -1469,6 +1529,7 @@ namespace dxvk {
 
     // Post Effect Settings
 
+    ImGui::Dummy(ImVec2(0.0f, 3.0f));
     ImGui::TextSeparator("Post Effect Settings");
 
     {
@@ -1503,6 +1564,7 @@ namespace dxvk {
 
     // Other Settings
 
+    ImGui::Dummy(ImVec2(0.0f, 3.0f));
     ImGui::TextSeparator("Other Settings");
 
     {
@@ -1991,21 +2053,69 @@ namespace dxvk {
 
       static bool pendingUiOptionsScroll = false;
       if (pendingUiOptionsScroll) {
-        ImGui::SetScrollHereY(0.5f);
+        ImGui::SetScrollHereY(0.0f);
         pendingUiOptionsScroll = false;
       }
 
-      ImGui::Checkbox("Compact UI", &compactGuiObject());
-      if (static bool isCompactUI = compactGui(); isCompactUI != compactGui()) {
-        isCompactUI = compactGui(); // can not use result of checkbox as options are set delayed
-        pendingUiOptionsScroll = true; // scroll to UI Options on the next frame
-        setupStyle();
+      {
+        ImGui::Checkbox("Compact UI", &compactGuiObject());
+        if (static bool isCompactUI = compactGui(); isCompactUI != compactGui()) {
+          // Can not use result of checkbox as options are set delayed
+          isCompactUI = compactGui();
+          setupStyle();
+
+          // Scroll to UI Options on the next frame
+          pendingUiOptionsScroll = true;
+        }
       }
 
       ImGui::Checkbox("Always Developer Menu", &RtxOptions::defaultToAdvancedUIObject());
 
       if (ImGui::SliderFloat("Background Alpha", &backgroundAlphaObject(), 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
         setupStyleBackgroundColor(backgroundAlphaObject().get());
+      }
+
+      {
+        // Save default font
+        //static ImFont* regularFont = ImGui::GetIO().FontDefault;
+        static float regularWindowWidth = m_windowWidth;
+        static float regularUserWindowWidth = m_userWindowWidth;
+        static float regularUserWindowHeight = m_userWindowHeight;
+        static bool useLargeFont = false;
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::Button(useLargeFont ? "Switch to Regular UI" : "Switch to Large UI", ImVec2(ImGui::CalcItemWidth(), 0)),
+                              "Toggles between Large and Regular GUI Scale Modes. This option will not be serialized and saved.")) {
+          ImGui::GetIO().FontDefault = useLargeFont ? m_regularFont : m_largeFont;
+
+          // Can not set m_windowWidth because it will be overridden after the main tab bar ends
+          ImGui::GetCurrentWindow()->Size.x = useLargeFont ? regularWindowWidth : 670.0f;
+
+          // User menu size
+          m_userWindowWidth = useLargeFont ? regularUserWindowWidth : 776.0f;
+          m_userWindowHeight = useLargeFont ? regularUserWindowHeight : 926.0f;
+
+          useLargeFont = !useLargeFont;
+
+          // Scroll to UI Options on the next frame
+          pendingUiOptionsScroll = true;
+        }
+      }
+
+      {
+        static float uiScale = 1.0f;
+        if (IMGUI_ADD_TOOLTIP(ImGui::InputFloat("Manual UI Scale", &uiScale, 0.1f, 0.2f, "%.2f"),
+                              "A value controlling the scale of the entire GUI. This option will not be serialized and saved.")) {
+          uiScale = std::clamp(uiScale, 0.8f, 1.5f);
+
+          // "Reset" style so that we do not rescale from the last scaled value
+          setupStyle();
+
+          ImGui::GetStyle().ScaleAllSizes(uiScale);
+          ImGui::GetIO().FontGlobalScale = uiScale;
+
+          // Scroll to UI Options on the next frame
+          pendingUiOptionsScroll = true;
+        }
       }
 
       ImGui::Unindent();
@@ -2646,7 +2756,7 @@ namespace dxvk {
         }
       }
 
-      separator();
+      //separator();
       ImGui::EndTabItem();
     }
 
@@ -2804,7 +2914,7 @@ namespace dxvk {
         ImGui::Unindent();
       }
 
-      separator();
+      //separator();
       ImGui::EndTabItem();
     }
 
@@ -2815,7 +2925,7 @@ namespace dxvk {
   void ImGUI::setupStyleBackgroundColor(const float& alpha) {
     ImGuiStyle* style = &ImGui::GetStyle();
     style->Colors[ImGuiCol_WindowBg] = ImVec4(0.26f, 0.26f, 0.26f, alpha);
-    style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, alpha);
+    //style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, alpha);
   }
 
   void ImGUI::setupStyle(ImGuiStyle* dst) {
@@ -2848,10 +2958,19 @@ namespace dxvk {
     style->ScrollbarRounding = 2.0f;
     style->GrabRounding = 1.0f;
     style->TabRounding = 2.0f;
-
     style->WindowMenuButtonPosition = ImGuiDir_None;
 
+    // only here because of UI scaling
+    style->WindowMinSize = ImVec2(32, 32);
+    style->TouchExtraPadding = ImVec2(0, 0);
+    style->LogSliderDeadzone = 4.0f;
+    style->TabMinWidthForCloseButton = 0.0f;
+    style->DisplayWindowPadding = ImVec2(19, 19);
+    style->DisplaySafeAreaPadding = ImVec2(3, 3);
+    style->MouseCursorScale = 1.0f;
+
     setupStyleBackgroundColor(backgroundAlpha());
+    style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, 1.00f);
     style->Colors[ImGuiCol_Text] = ImVec4(0.80f, 0.80f, 0.80f, 1.00f);
     style->Colors[ImGuiCol_TextDisabled] = ImVec4(0.44f, 0.44f, 0.44f, 1.00f);
     style->Colors[ImGuiCol_ChildBg] = ImVec4(0.19f, 0.19f, 0.19f, 0.80f);
@@ -3972,7 +4091,8 @@ namespace dxvk {
 
     {
       // Add letters/symbols (NVIDIA-Sans)
-      io.FontDefault = io.Fonts->AddFontFromMemoryTTF(&___NVIDIASansMd[0], nvidiaSansLength, 0, &normalFontCfg, characterRange.Data);
+      m_regularFont = io.Fonts->AddFontFromMemoryTTF(&___NVIDIASansMd[0], nvidiaSansLength, 0, &normalFontCfg, characterRange.Data);
+      io.FontDefault = m_regularFont;
 
       // Enable merging
       normalFontCfg.MergeMode = true;
