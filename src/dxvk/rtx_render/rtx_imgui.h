@@ -42,6 +42,8 @@ namespace ImGui {
   // Adds a tooltip to the imguiCommand and returns boolean result from the passed in imguiCommand
 #define IMGUI_ADD_TOOLTIP(imguiCommand, tooltip) ImGui::addTooltipAndPassthroughValue((imguiCommand), tooltip)
 
+  IMGUI_API void TextCentered(const char* fmt, ...);
+  IMGUI_API void TextWrappedCentered(const char* fmt, ...);
   IMGUI_API bool Checkbox(const char* label, dxvk::RtxOption<bool>* rtxOption);
   IMGUI_API bool Combo(const char* label, int* current_item, const std::pair<const char*, const char*> items[], int items_count, int popup_max_height_in_items = -1);
   IMGUI_API bool Combo(const char* label, int* current_item, bool(*items_getter)(void* data, int idx, const char** out_text, const char** out_tooltip), void* data, int items_count, int popup_max_height_in_items = -1);

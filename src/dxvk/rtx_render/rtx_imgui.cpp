@@ -28,6 +28,22 @@ namespace ImGui {
     ImGui::SetTooltipUnformatted(text);
   }
 
+  void TextCentered(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    ImGui::SetCursorPosX((ImGui::GetWindowSize().x - ImGui::CalcTextSize(fmt).x) * 0.5f);
+    ImGui::TextV(fmt, args);
+    va_end(args);
+  }
+
+  void TextWrappedCentered(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    ImGui::SetCursorPosX((ImGui::GetWindowSize().x - ImGui::CalcTextSize(fmt).x) * 0.5f);
+    ImGui::TextWrappedV(fmt, args);
+    va_end(args);
+  }
+
   bool Checkbox(const char* label, dxvk::RtxOption<bool>* rtxOption) {
     bool value = rtxOption->get();
     bool changed = IMGUI_ADD_TOOLTIP(Checkbox(label, &value), rtxOption->getDescription());

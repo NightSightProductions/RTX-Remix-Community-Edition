@@ -140,6 +140,8 @@ namespace dxvk {
     Rc<ImGuiSplash>       m_splash;
     Rc<ImGuiCapture>      m_capture;
     // Note: May be NULL until the font loads, needs to be checked before use.
+    ImFont*               m_regularFont = nullptr;
+    // Note: May be NULL until the font loads, needs to be checked before use.
     ImFont*               m_largeFont = nullptr;
 
     ImGuiContext*         m_context;
@@ -151,7 +153,7 @@ namespace dxvk {
     bool                  m_windowOnRight = true;
     float                 m_windowWidth = 492.f;
     float                 m_userWindowWidth = 600.f;
-    float                 m_userWindowHeight = 550.f;
+    float                 m_userWindowHeight = 720.f;
     const char*           m_userGraphicsWindowTitle = "User Graphics Settings";
     bool                  m_userGraphicsSettingChanged = false;
     bool m_hudMessageTimeReset = false;
@@ -225,7 +227,9 @@ namespace dxvk {
     void createFontsTexture(const Rc<DxvkContext>& ctx);
 
     void setupStyleBackgroundColor(const float& alpha);
-    void setupStyle(ImGuiStyle* dst = NULL);      // custom style
+
+    // Custom style
+    void setupStyle(ImGuiStyle* dst = NULL);
     void showVsyncOptions(bool enableDLFGGuard);
 
     void processHotkeys();
