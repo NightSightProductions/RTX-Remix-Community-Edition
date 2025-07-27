@@ -251,7 +251,7 @@ void geometryResolverOutputSurface(
     const vec2 ndc = cameraPixelCoordinateToNDC(cb.camera, pixelCoordinate);
     const vec2 motionVectorNDC = prevNDC - ndc;
     const vec2 motionVectorUVOffset = motionVectorNDC * vec2(0.5, -0.5);
-    const vec2 motionVectorPixel = motionVectorUVOffset * cb.camera.resolution;
+    vec2 motionVectorPixel = motionVectorUVOffset * cb.camera.resolution;
 
     // Write out screen-space motion.
     PrimaryScreenSpaceMotionVector[pixelCoordinate] = motionVectorPixel;
