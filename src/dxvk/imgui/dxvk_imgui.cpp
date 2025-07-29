@@ -2075,6 +2075,25 @@ namespace dxvk {
         setupStyleBackgroundColor(backgroundAlphaObject().get());
       }
 
+      float bgColor[3] = { backgroundColor().x, backgroundColor().y, backgroundColor().z };
+      if (ImGui::ColorEdit3("Background Color", bgColor, ImGuiColorEditFlags_NoInputs)) {
+        backgroundColorObject().setDeferred(Vector3(bgColor[0], bgColor[1], bgColor[2]));
+        setupStyleBackgroundColor(backgroundAlpha());
+      }
+
+      float accentColorArray[3] = { accentColor().x, accentColor().y, accentColor().z };
+      if (ImGui::ColorEdit3("Accent Color", accentColorArray, ImGuiColorEditFlags_NoInputs)) {
+        accentColorObject().setDeferred(Vector3(accentColorArray[0], accentColorArray[1], accentColorArray[2]));
+        setupStyle();
+      }
+
+      if (ImGui::Button("Reset Colors to Default", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+        backgroundColorObject().setDeferred(Vector3(0.26f, 0.26f, 0.26f));
+        accentColorObject().setDeferred(Vector3(0.17f, 0.25f, 0.27f));
+        setupStyleBackgroundColor(backgroundAlpha());
+        setupStyle();
+      }
+
       {
         // Save default font
         //static ImFont* regularFont = ImGui::GetIO().FontDefault;
@@ -2924,8 +2943,9 @@ namespace dxvk {
 
   void ImGUI::setupStyleBackgroundColor(const float& alpha) {
     ImGuiStyle* style = &ImGui::GetStyle();
-    style->Colors[ImGuiCol_WindowBg] = ImVec4(0.26f, 0.26f, 0.26f, alpha);
-    //style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, alpha);
+    const Vector3& bgColor = backgroundColor();
+    style->Colors[ImGuiCol_WindowBg] = ImVec4(bgColor.x, bgColor.y, bgColor.z, alpha);
+    style->Colors[ImGuiCol_PopupBg] = ImVec4(bgColor.x + 0.02f, bgColor.y + 0.02f, bgColor.z + 0.02f, alpha);
   }
 
   void ImGUI::setupStyle(ImGuiStyle* dst) {
@@ -2970,6 +2990,9 @@ namespace dxvk {
     style->MouseCursorScale = 1.0f;
 
     setupStyleBackgroundColor(backgroundAlpha());
+    const Vector3& accent = accentColor();
+    const Vector3 accentActive = Vector3(accent.x * 0.4f, accent.y * 1.56f, accent.z * 1.74f); // Brighter version for active states
+    
     style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, 1.00f);
     style->Colors[ImGuiCol_Text] = ImVec4(0.80f, 0.80f, 0.80f, 1.00f);
     style->Colors[ImGuiCol_TextDisabled] = ImVec4(0.44f, 0.44f, 0.44f, 1.00f);
@@ -2977,8 +3000,8 @@ namespace dxvk {
     style->Colors[ImGuiCol_Border] = ImVec4(0.31f, 0.31f, 0.31f, 1.00f);
     style->Colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.23f);
     style->Colors[ImGuiCol_FrameBg] = ImVec4(0.19f, 0.19f, 0.19f, 1.00f);
-    style->Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.17f, 0.25f, 0.27f, 1.00f);
-    style->Colors[ImGuiCol_FrameBgActive] = ImVec4(0.07f, 0.39f, 0.47f, 0.59f);
+    style->Colors[ImGuiCol_FrameBgHovered] = ImVec4(accent.x, accent.y, accent.z, 1.00f);
+    style->Colors[ImGuiCol_FrameBgActive] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.59f);
     style->Colors[ImGuiCol_TitleBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.98f);
     style->Colors[ImGuiCol_TitleBgActive] = ImVec4(0.15f, 0.15f, 0.15f, 0.98f);
     style->Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.15f, 0.15f, 0.15f, 0.98f);
@@ -2994,17 +3017,17 @@ namespace dxvk {
     style->Colors[ImGuiCol_ButtonHovered] = ImVec4(0.24f, 0.24f, 0.24f, 1.00f);
     style->Colors[ImGuiCol_ButtonActive] = ImVec4(0.40f, 0.45f, 0.45f, 1.00f);
     style->Colors[ImGuiCol_Header] = ImVec4(0.02f, 0.02f, 0.02f, 0.39f);
-    style->Colors[ImGuiCol_HeaderHovered] = ImVec4(0.17f, 0.25f, 0.27f, 0.78f);
-    style->Colors[ImGuiCol_HeaderActive] = ImVec4(0.17f, 0.25f, 0.27f, 0.78f);
+    style->Colors[ImGuiCol_HeaderHovered] = ImVec4(accent.x, accent.y, accent.z, 0.78f);
+    style->Colors[ImGuiCol_HeaderActive] = ImVec4(accent.x, accent.y, accent.z, 0.78f);
     style->Colors[ImGuiCol_Separator] = ImVec4(0.35f, 0.35f, 0.35f, 1.00f);
-    style->Colors[ImGuiCol_SeparatorHovered] = ImVec4(0.15f, 0.52f, 0.66f, 0.30f);
-    style->Colors[ImGuiCol_SeparatorActive] = ImVec4(0.30f, 0.69f, 0.84f, 0.39f);
+    style->Colors[ImGuiCol_SeparatorHovered] = ImVec4(accent.x * 0.88f, accent.y * 2.08f, accent.z * 2.44f, 0.30f);
+    style->Colors[ImGuiCol_SeparatorActive] = ImVec4(accentActive.x * 4.29f, accentActive.y * 0.44f, accentActive.z * 0.18f, 0.39f);
     style->Colors[ImGuiCol_ResizeGrip] = ImVec4(0.43f, 0.43f, 0.43f, 0.51f);
-    style->Colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.07f, 0.39f, 0.47f, 0.59f);
-    style->Colors[ImGuiCol_ResizeGripActive] = ImVec4(0.30f, 0.69f, 0.84f, 0.39f);
+    style->Colors[ImGuiCol_ResizeGripHovered] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.59f);
+    style->Colors[ImGuiCol_ResizeGripActive] = ImVec4(accentActive.x * 4.29f, accentActive.y * 0.44f, accentActive.z * 0.18f, 0.39f);
     style->Colors[ImGuiCol_Tab] = ImVec4(0.00f, 0.00f, 0.00f, 0.37f);
-    style->Colors[ImGuiCol_TabHovered] = ImVec4(0.22f, 0.33f, 0.36f, 1.00f);
-    style->Colors[ImGuiCol_TabActive] = ImVec4(0.11f, 0.42f, 0.51f, 1.00f);
+    style->Colors[ImGuiCol_TabHovered] = ImVec4(accent.x * 1.29f, accent.y * 1.32f, accent.z * 1.33f, 1.00f);
+    style->Colors[ImGuiCol_TabActive] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 1.00f);
     style->Colors[ImGuiCol_TabUnfocused] = ImVec4(0.00f, 0.00f, 0.00f, 0.16f);
     style->Colors[ImGuiCol_TabUnfocusedActive] = ImVec4(1.00f, 1.00f, 1.00f, 0.24f);
     style->Colors[ImGuiCol_PlotLines] = ImVec4(1.00f, 1.00f, 1.00f, 0.35f);
@@ -3015,9 +3038,9 @@ namespace dxvk {
     style->Colors[ImGuiCol_TableBorderStrong] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
     style->Colors[ImGuiCol_TableBorderLight] = ImVec4(0.00f, 0.00f, 0.00f, 0.54f);
     style->Colors[ImGuiCol_TableRowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.39f);
-    style->Colors[ImGuiCol_TableRowBgAlt] = ImVec4(0.11f, 0.42f, 0.51f, 0.35f);
+    style->Colors[ImGuiCol_TableRowBgAlt] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.35f);
     style->Colors[ImGuiCol_TextSelectedBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
-    style->Colors[ImGuiCol_DragDropTarget] = ImVec4(0.00f, 0.51f, 0.39f, 0.31f);
+    style->Colors[ImGuiCol_DragDropTarget] = ImVec4(accentActive.x * 0.0f, accentActive.y * 1.31f, accentActive.z * 0.83f, 0.31f);
     style->Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     style->Colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     style->Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.56f);

@@ -244,6 +244,8 @@ namespace dxvk {
     RTX_OPTION("rtx.gui", float, reflexStatRangePaddingRatio, 0.05f, "A value specifying the amount of padding applied to the Reflex stat graph ranges as a ratio to the calculated range.");
     RTX_OPTION("rtx.gui", bool, compactGui, false, "A setting to toggle between compact and spacious GUI modes.");
     RTX_OPTION("rtx.gui", float, backgroundAlpha, 0.90f, "A value controlling the alpha of the GUI background.");
+    RTX_OPTION("rtx.gui", Vector3, backgroundColor, Vector3(0.26f, 0.26f, 0.26f), "The RGB color values for the GUI background.");
+    RTX_OPTION("rtx.gui", Vector3, accentColor, Vector3(0.17f, 0.25f, 0.27f), "The RGB color values for the GUI accent color (hover states, active elements).");
 
     void onCloseMenus();
     void onOpenMenus();
