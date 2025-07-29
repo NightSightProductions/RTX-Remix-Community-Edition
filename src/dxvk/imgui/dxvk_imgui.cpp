@@ -2991,9 +2991,11 @@ namespace dxvk {
 
     setupStyleBackgroundColor(backgroundAlpha());
     const Vector3& accent = accentColor();
-    const Vector3 accentActive = Vector3(accent.x * 0.4f, accent.y * 1.56f, accent.z * 1.74f); // Brighter version for active states
+    const Vector3 accentActive = accent * 1.5f; // Brighter version for active states (preserves hue)
+    const Vector3 accentDark = accent * 0.7f; // Darker version for some elements
     
-    style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, 1.00f);
+    const Vector3& bgColor = backgroundColor();
+    style->Colors[ImGuiCol_PopupBg] = ImVec4(bgColor.x + 0.02f, bgColor.y + 0.02f, bgColor.z + 0.02f, 1.00f);
     style->Colors[ImGuiCol_Text] = ImVec4(0.80f, 0.80f, 0.80f, 1.00f);
     style->Colors[ImGuiCol_TextDisabled] = ImVec4(0.44f, 0.44f, 0.44f, 1.00f);
     style->Colors[ImGuiCol_ChildBg] = ImVec4(0.19f, 0.19f, 0.19f, 0.80f);
@@ -3008,25 +3010,25 @@ namespace dxvk {
     style->Colors[ImGuiCol_MenuBarBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     style->Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.24f);
     style->Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.34f, 0.34f, 0.34f, 0.39f);
-    style->Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.54f, 0.54f, 0.54f, 0.47f);
-    style->Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.78f, 0.78f, 0.78f, 0.33f);
-    style->Colors[ImGuiCol_CheckMark] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-    style->Colors[ImGuiCol_SliderGrab] = ImVec4(1.00f, 1.00f, 1.00f, 0.39f);
-    style->Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.00f, 1.00f, 1.00f, 0.31f);
+    style->Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(accent.x, accent.y, accent.z, 0.47f);
+    style->Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.33f);
+    style->Colors[ImGuiCol_CheckMark] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 1.00f);
+    style->Colors[ImGuiCol_SliderGrab] = ImVec4(accent.x, accent.y, accent.z, 0.39f);
+    style->Colors[ImGuiCol_SliderGrabActive] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.31f);
     style->Colors[ImGuiCol_Button] = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
-    style->Colors[ImGuiCol_ButtonHovered] = ImVec4(0.24f, 0.24f, 0.24f, 1.00f);
-    style->Colors[ImGuiCol_ButtonActive] = ImVec4(0.40f, 0.45f, 0.45f, 1.00f);
+    style->Colors[ImGuiCol_ButtonHovered] = ImVec4(accent.x, accent.y, accent.z, 1.00f);
+    style->Colors[ImGuiCol_ButtonActive] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 1.00f);
     style->Colors[ImGuiCol_Header] = ImVec4(0.02f, 0.02f, 0.02f, 0.39f);
     style->Colors[ImGuiCol_HeaderHovered] = ImVec4(accent.x, accent.y, accent.z, 0.78f);
     style->Colors[ImGuiCol_HeaderActive] = ImVec4(accent.x, accent.y, accent.z, 0.78f);
     style->Colors[ImGuiCol_Separator] = ImVec4(0.35f, 0.35f, 0.35f, 1.00f);
-    style->Colors[ImGuiCol_SeparatorHovered] = ImVec4(accent.x * 0.88f, accent.y * 2.08f, accent.z * 2.44f, 0.30f);
-    style->Colors[ImGuiCol_SeparatorActive] = ImVec4(accentActive.x * 4.29f, accentActive.y * 0.44f, accentActive.z * 0.18f, 0.39f);
+    style->Colors[ImGuiCol_SeparatorHovered] = ImVec4(accent.x, accent.y, accent.z, 0.30f);
+    style->Colors[ImGuiCol_SeparatorActive] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.39f);
     style->Colors[ImGuiCol_ResizeGrip] = ImVec4(0.43f, 0.43f, 0.43f, 0.51f);
     style->Colors[ImGuiCol_ResizeGripHovered] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.59f);
-    style->Colors[ImGuiCol_ResizeGripActive] = ImVec4(accentActive.x * 4.29f, accentActive.y * 0.44f, accentActive.z * 0.18f, 0.39f);
+    style->Colors[ImGuiCol_ResizeGripActive] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.39f);
     style->Colors[ImGuiCol_Tab] = ImVec4(0.00f, 0.00f, 0.00f, 0.37f);
-    style->Colors[ImGuiCol_TabHovered] = ImVec4(accent.x * 1.29f, accent.y * 1.32f, accent.z * 1.33f, 1.00f);
+    style->Colors[ImGuiCol_TabHovered] = ImVec4(accent.x, accent.y, accent.z, 1.00f);
     style->Colors[ImGuiCol_TabActive] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 1.00f);
     style->Colors[ImGuiCol_TabUnfocused] = ImVec4(0.00f, 0.00f, 0.00f, 0.16f);
     style->Colors[ImGuiCol_TabUnfocusedActive] = ImVec4(1.00f, 1.00f, 1.00f, 0.24f);
@@ -3040,7 +3042,7 @@ namespace dxvk {
     style->Colors[ImGuiCol_TableRowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.39f);
     style->Colors[ImGuiCol_TableRowBgAlt] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.35f);
     style->Colors[ImGuiCol_TextSelectedBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
-    style->Colors[ImGuiCol_DragDropTarget] = ImVec4(accentActive.x * 0.0f, accentActive.y * 1.31f, accentActive.z * 0.83f, 0.31f);
+    style->Colors[ImGuiCol_DragDropTarget] = ImVec4(accentActive.x, accentActive.y, accentActive.z, 0.31f);
     style->Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     style->Colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     style->Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.56f);
