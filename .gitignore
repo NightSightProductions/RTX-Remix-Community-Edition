@@ -38,3 +38,5 @@
 /public/bin/
 tests/rtx/dxvk_rt_testing/apics
 *.log
+nv-private
+tests
