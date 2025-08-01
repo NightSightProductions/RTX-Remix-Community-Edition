@@ -2058,10 +2058,10 @@ namespace dxvk {
       }
 
       {
-        ImGui::Checkbox("Compact UI", &compactGuiObject());
-        if (static bool isCompactUI = compactGui(); isCompactUI != compactGui()) {
+        ImGui::Checkbox("Compact UI", &RtxOptions::uiCompactModeObject());
+        if (static bool isCompactUI = RtxOptions::uiCompactMode(); isCompactUI != RtxOptions::uiCompactMode()) {
           // Can not use result of checkbox as options are set delayed
-          isCompactUI = compactGui();
+          isCompactUI = RtxOptions::uiCompactMode();
           setupStyle();
 
           // Scroll to UI Options on the next frame
@@ -2071,26 +2071,26 @@ namespace dxvk {
 
       ImGui::Checkbox("Always Developer Menu", &RtxOptions::defaultToAdvancedUIObject());
 
-      if (ImGui::SliderFloat("Background Alpha", &backgroundAlphaObject(), 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
-        setupStyleBackgroundColor(backgroundAlphaObject().get());
+      if (ImGui::SliderFloat("Background Alpha", &RtxOptions::uiBackgroundAlphaObject(), 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
+        setupStyleBackgroundColor(RtxOptions::uiBackgroundAlphaObject().get());
       }
 
-      float bgColor[3] = { backgroundColor().x, backgroundColor().y, backgroundColor().z };
+      float bgColor[3] = { RtxOptions::uiBackgroundColor().x, RtxOptions::uiBackgroundColor().y, RtxOptions::uiBackgroundColor().z };
       if (ImGui::ColorEdit3("Background Color", bgColor, ImGuiColorEditFlags_NoInputs)) {
-        backgroundColorObject().setDeferred(Vector3(bgColor[0], bgColor[1], bgColor[2]));
-        setupStyleBackgroundColor(backgroundAlpha());
+        RtxOptions::uiBackgroundColorObject().setDeferred(Vector3(bgColor[0], bgColor[1], bgColor[2]));
+        setupStyleBackgroundColor(RtxOptions::uiBackgroundAlpha());
       }
 
-      float accentColorArray[3] = { accentColor().x, accentColor().y, accentColor().z };
+      float accentColorArray[3] = { RtxOptions::uiAccentColor().x, RtxOptions::uiAccentColor().y, RtxOptions::uiAccentColor().z };
       if (ImGui::ColorEdit3("Accent Color", accentColorArray, ImGuiColorEditFlags_NoInputs)) {
-        accentColorObject().setDeferred(Vector3(accentColorArray[0], accentColorArray[1], accentColorArray[2]));
+        RtxOptions::uiAccentColorObject().setDeferred(Vector3(accentColorArray[0], accentColorArray[1], accentColorArray[2]));
         setupStyle();
       }
 
       if (ImGui::Button("Reset Colors to Default", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
-        backgroundColorObject().setDeferred(Vector3(0.26f, 0.26f, 0.26f));
-        accentColorObject().setDeferred(Vector3(0.17f, 0.25f, 0.27f));
-        setupStyleBackgroundColor(backgroundAlpha());
+        RtxOptions::uiBackgroundColorObject().setDeferred(Vector3(0.26f, 0.26f, 0.26f));
+        RtxOptions::uiAccentColorObject().setDeferred(Vector3(0.17f, 0.25f, 0.27f));
+        setupStyleBackgroundColor(RtxOptions::uiBackgroundAlpha());
         setupStyle();
       }
 
@@ -2943,14 +2943,14 @@ namespace dxvk {
 
   void ImGUI::setupStyleBackgroundColor(const float& alpha) {
     ImGuiStyle* style = &ImGui::GetStyle();
-    const Vector3& bgColor = backgroundColor();
+    const Vector3& bgColor = RtxOptions::uiBackgroundColor();
     style->Colors[ImGuiCol_WindowBg] = ImVec4(bgColor.x, bgColor.y, bgColor.z, alpha);
     style->Colors[ImGuiCol_PopupBg] = ImVec4(bgColor.x + 0.02f, bgColor.y + 0.02f, bgColor.z + 0.02f, alpha);
   }
 
   void ImGUI::setupStyle(ImGuiStyle* dst) {
     ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
-    const bool isCompact = compactGui();
+    const bool isCompact = RtxOptions::uiCompactMode();
 
     style->Alpha = 1.0f;
     style->DisabledAlpha = 0.5f;
@@ -2989,12 +2989,12 @@ namespace dxvk {
     style->DisplaySafeAreaPadding = ImVec2(3, 3);
     style->MouseCursorScale = 1.0f;
 
-    setupStyleBackgroundColor(backgroundAlpha());
-    const Vector3& accent = accentColor();
+    setupStyleBackgroundColor(RtxOptions::uiBackgroundAlpha());
+    const Vector3& accent = RtxOptions::uiAccentColor();
     const Vector3 accentActive = accent * 1.5f; // Brighter version for active states (preserves hue)
     const Vector3 accentDark = accent * 0.7f; // Darker version for some elements
     
-    const Vector3& bgColor = backgroundColor();
+    const Vector3& bgColor = RtxOptions::uiBackgroundColor();
     style->Colors[ImGuiCol_PopupBg] = ImVec4(bgColor.x + 0.02f, bgColor.y + 0.02f, bgColor.z + 0.02f, 1.00f);
     style->Colors[ImGuiCol_Text] = ImVec4(0.80f, 0.80f, 0.80f, 1.00f);
     style->Colors[ImGuiCol_TextDisabled] = ImVec4(0.44f, 0.44f, 0.44f, 1.00f);

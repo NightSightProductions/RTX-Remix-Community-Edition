@@ -478,6 +478,12 @@ namespace dxvk {
                     "If true, input will not be passed to the game when the UI is active.\n"
                     "Can be toggled with Alt + Backspace", args.onChangeCallback = &blockInputToGameInUIOnChange, args.flags = RtxOptionFlags::NoSave);
 
+    // UI Color Options
+    RTX_OPTION("rtx", Vector3, uiBackgroundColor, Vector3(0.26f, 0.26f, 0.26f), "The RGB color values for the GUI background.");
+    RTX_OPTION("rtx", Vector3, uiAccentColor, Vector3(0.17f, 0.25f, 0.27f), "The RGB color values for the GUI accent color (hover states, active elements).");
+    RTX_OPTION("rtx", float, uiBackgroundAlpha, 0.90f, "A value controlling the alpha of the GUI background.");
+    RTX_OPTION("rtx", bool, uiCompactMode, false, "A setting to toggle between compact and spacious GUI modes.");
+
     inline static const VirtualKeys kDefaultRemixMenuKeyBinds{ VirtualKey{VK_MENU},VirtualKey{'X'} };
     RTX_OPTION("rtx", VirtualKeys, remixMenuKeyBinds, kDefaultRemixMenuKeyBinds,
                "Hotkey to open the Remix menu.\n"
