@@ -75,19 +75,16 @@ namespace dxvk {
       // Note: pi-based scalar used to align cycles with seconds countdown nicely.
       const float pulseInterpolationFactor = (std::cos(elapsedMilliseconds / 1000.0f * kPi / 2.0f) + 1.0f) / 2.0f;
 
-      // Use customizable UI colors with pulsing effect
-      const Vector3& baseColor = RtxOptions::uiAccentColor();
-      const Vector3& bgColor = RtxOptions::uiBackgroundColor();
-      
       ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(
-        lerp(bgColor.x * 0.6f, baseColor.x, pulseInterpolationFactor),
-        lerp(bgColor.y * 0.6f, baseColor.y, pulseInterpolationFactor),
-        lerp(bgColor.z * 0.6f, baseColor.z, pulseInterpolationFactor),
+        // Note: Darker variant of roughly-NVIDIA green to have good contrast against white text.
+        lerp(0.15f, 0.268f, pulseInterpolationFactor),
+        lerp(0.15f, 0.42f, pulseInterpolationFactor),
+        lerp(0.15f, 0.03f, pulseInterpolationFactor),
         lerp(0.8f, 0.95f, pulseInterpolationFactor)
       ));
 
       if (ImGui::Begin("Splash Message", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove)) {
-        const auto keyBindDescriptor = buildKeyBindDescriptorString(RtxOptions::Get()->remixMenuKeyBinds());
+        const auto keyBindDescriptor = buildKeyBindDescriptorString(RtxOptions::remixMenuKeyBinds());
         std::string message = str::format("Welcome to Garry's Mod RTX.  At any point during gameplay press : ", keyBindDescriptor, " to access the Remix Menu.\n"
                                         "\n"
                                         "This is a work in progress, report any bugs you find to https://github.com/Xenthio/gmod-rtx-fixes-2 \n"

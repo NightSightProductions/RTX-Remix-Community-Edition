@@ -769,7 +769,7 @@ namespace {
     }
     
     // Map the UIType enum to our API enum
-    switch (dxvk::RtxOptions::Get()->showUI()) {
+    switch (dxvk::RtxOptions::showUI()) {
         case dxvk::UIType::None:
             return REMIXAPI_UI_STATE_NONE;
         case dxvk::UIType::Basic:
