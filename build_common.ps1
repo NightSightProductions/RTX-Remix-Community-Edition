@@ -95,7 +95,7 @@ function PerformBuild {
 	$BuildDir = [IO.Path]::Combine($CurrentDir, $BuildSubDir)
 
 	Push-Location $CurrentDir
-		$mesonArgs = "setup --buildtype `"$BuildFlavour`" --backend `"$Backend`" -Denable_tracy=`"$EnableTracy`" `"$BuildSubDir`""
+		$mesonArgs = "setup --buildtype `"$BuildFlavour`" --backend `"$Backend`" -Denable_tracy=`"$EnableTracy`" -Denable_tests=false `"$BuildSubDir`""
 		Start-Process "meson" -NoNewWindow -ArgumentList $mesonArgs -wait
 	Pop-Location
 
