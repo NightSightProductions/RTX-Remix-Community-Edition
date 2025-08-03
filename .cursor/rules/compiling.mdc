@@ -5,4 +5,3 @@ alwaysApply: false
 ---
 
 When attempting to compile dxvk-remix, always use `.\build_dxvk_release.ps1` in the root directory.
-Don't use individual commands like `ninja -j 8 -C _Comp64Release`

@@ -259,6 +259,9 @@ namespace {
           src.getMetallicConstant(),
           src.getEmissiveColorConstant(),
           src.getEnableEmission(),
+          src.getEmissiveAlphaMask(),
+          src.getEmissiveAlphaInvert(),
+          src.getEmissiveColorTint(),
           src.getSpriteSheetRows(),
           src.getSpriteSheetCols(),
           src.getSpriteSheetFPS(),
@@ -355,6 +358,9 @@ namespace {
           extOpaque->metallicConstant,
           tovec3(info.emissiveColorConstant),
           info.emissiveIntensity > 0.f,
+          false, // EmissiveAlphaMask - not used for API materials
+          false, // EmissiveAlphaInvert - not used for API materials
+          Vector3(1.0f, 1.0f, 1.0f), // EmissiveColorTint - white default for API materials
           info.spriteSheetRow,
           info.spriteSheetCol,
           info.spriteSheetFps,
@@ -590,6 +596,7 @@ namespace {
       CategoryFlags result { 0 };
       if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_WORLD_UI                 ){ result.set(InstanceCategories::WorldUI               ); }
       if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_WORLD_MATTE              ){ result.set(InstanceCategories::WorldMatte            ); }
+      if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_LEGACY_EMISSIVE          ){ result.set(InstanceCategories::LegacyEmissive        ); }
       if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_SKY                      ){ result.set(InstanceCategories::Sky                   ); }
       if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_IGNORE                   ){ result.set(InstanceCategories::Ignore                ); }
       if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_IGNORE_LIGHTS            ){ result.set(InstanceCategories::IgnoreLights          ); }
