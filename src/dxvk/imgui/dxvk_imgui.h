@@ -150,12 +150,27 @@ namespace dxvk {
     HWND                  m_hwnd;
     bool                  m_init = false;
 
+
+    // Width of developer menu in regular mode
     static constexpr float m_regularWindowWidth = 492.f;
+    // Width of item+label widgets in regular mode (developer menu)
+    static constexpr float m_regularWindowWidgetWidth = 200.f;
+
+    // Width of developer menu in large mode
+    static constexpr float m_largeWindowWidth = 670.0f;
+    // Width of item+label widgets in large mode (developer menu)
+    static constexpr float m_largeWindowWidgetWidth = 364.0f;
+
     static constexpr float m_regularUserWindowWidth = 600.f;
     static constexpr float m_regularUserWindowHeight = 720.f;
-    static constexpr float m_largeWindowWidth = 670.0f;
+    // Width of item+label widgets in regular mode (user menu)
+    static constexpr float m_regularUserWindowWidgeWidth = 140.f;
+
     static constexpr float m_largeUserWindowWidth = 776.0f;
     static constexpr float m_largeUserWindowHeight = 926.0f;
+    // Width of item+label widgets in large mode
+    static constexpr float m_largeUserWindowWidgeWidth = 252.f;
+    
 
     bool                  m_windowOnRight = true;
     bool                  m_LargeUIMode = false;

@@ -1144,7 +1144,7 @@ namespace dxvk {
     const float windowPaddingHalfX = windowPaddingX * 0.5f;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(windowPaddingX, 10));
 
-    // use same background color and alpha as other menus, PopupBg has alpha 1 because it's used for combobox popups etc. 
+    // Use the same background color and alpha as other menus, PopupBg has alpha 1 because it's used for combobox popups etc. 
     ImGui::PushStyleColor(ImGuiCol_PopupBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
     bool pushedPopupBg = true;
 
@@ -1157,9 +1157,9 @@ namespace dxvk {
       // Always display memory stats to user.
       showMemoryStats();
 
-      const int itemWidth = 140;
-      const int subItemWidth = 120;
-      constexpr int subItemIndent = (itemWidth > subItemWidth) ? (itemWidth - subItemWidth) : 0;
+      const int itemWidth = static_cast<int>(m_LargeUIMode ? m_largeUserWindowWidgeWidth : m_regularUserWindowWidgeWidth);
+      const int subItemWidth = static_cast<int>(ImCeil(itemWidth * 0.86f));
+      const int subItemIndent = (itemWidth > subItemWidth) ? (itemWidth - subItemWidth) : 0;
 
       const ImVec2 childSize = ImVec2(ImGui::GetContentRegionAvail().x + windowPaddingX, m_userWindowHeight * 0.63f);
       const static ImGuiTabBarFlags tab_bar_flags = ImGuiTabBarFlags_NoCloseWithMiddleMouseButton;
@@ -1773,7 +1773,7 @@ namespace dxvk {
   }
 
   void ImGUI::showDevelopmentSettings(const Rc<DxvkContext>& ctx) {
-    ImGui::PushItemWidth(250);
+    ImGui::PushItemWidth((m_LargeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth) + 50.0f);
     if (ImGui::Button("Take Screenshot")) {
       RtxContext::triggerScreenshot();
     }
@@ -2521,7 +2521,7 @@ namespace dxvk {
   }
 
   void ImGUI::showEnhancementsWindow(const Rc<DxvkContext>& ctx) {
-    ImGui::PushItemWidth(200);
+    ImGui::PushItemWidth(m_LargeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
 
     m_capture->show(ctx);
     
@@ -2618,7 +2618,7 @@ namespace dxvk {
     if (!ImGui::BeginTabBar("##showSetupWindow", tab_bar_flags)) {
       return;
     }
-    ImGui::PushItemWidth(200);
+    ImGui::PushItemWidth(m_LargeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
 
     texture_popup::lastOpenCategoryActive = false;
 
@@ -3225,7 +3225,7 @@ namespace dxvk {
   }
 
   void ImGUI::showRenderingSettings(const Rc<DxvkContext>& ctx) {
-    ImGui::PushItemWidth(200);
+    ImGui::PushItemWidth(m_LargeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
     auto common = ctx->getCommonObjects();
 
     ImGui::Text("Disclaimer: The following settings are intended for developers,\nchanging them may introduce instability.");
