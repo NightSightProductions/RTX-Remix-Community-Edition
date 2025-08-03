@@ -150,10 +150,20 @@ namespace dxvk {
     HWND                  m_hwnd;
     bool                  m_init = false;
 
+    static constexpr float m_regularWindowWidth = 492.f;
+    static constexpr float m_regularUserWindowWidth = 600.f;
+    static constexpr float m_regularUserWindowHeight = 720.f;
+    static constexpr float m_largeWindowWidth = 670.0f;
+    static constexpr float m_largeUserWindowWidth = 776.0f;
+    static constexpr float m_largeUserWindowHeight = 926.0f;
+
     bool                  m_windowOnRight = true;
-    float                 m_windowWidth = 492.f;
-    float                 m_userWindowWidth = 600.f;
-    float                 m_userWindowHeight = 720.f;
+    bool                  m_LargeUIMode = false;
+    bool                  m_pendingUIOptionsScroll = false;
+    float                 m_windowWidth = m_regularWindowWidth;
+    float                 m_userWindowWidth = m_regularUserWindowWidth;
+    float                 m_userWindowHeight = m_regularUserWindowHeight;
+
     const char*           m_userGraphicsWindowTitle = "User Graphics Settings";
     bool                  m_userGraphicsSettingChanged = false;
     bool m_hudMessageTimeReset = false;

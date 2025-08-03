@@ -1107,16 +1107,7 @@ namespace dxvk {
       switchUI = (int) UIType::None;
     }
 
-    {
-      const char* inputHintText = "[Alt + Del] Toggle cursor        [Alt + Backspace] Toggle game input";
-      ImVec2 screenCursorPos = ImGui::GetCursorScreenPos();
-      screenCursorPos.x += (ImGui::GetWindowSize().x - ImGui::CalcTextSize(inputHintText).x) * 0.5f - 4.0f;
-      screenCursorPos.y += 2.0f;
-
-      ImGui::GetWindowDrawList()->AddText(ImGui::GetIO().FontDefault, 16.0f, screenCursorPos, ImGui::GetColorU32(ImGuiCol_Text), inputHintText);
-      ImGui::Dummy(ImVec2(0, 13));
-    }
-    
+    ImGui::TextCentered("[Alt + Del] Toggle cursor        [Alt + Backspace] Toggle game input");
     ImGui::End();
 
     // Close via titlebar close button
@@ -2051,10 +2042,10 @@ namespace dxvk {
     if (ImGui::CollapsingHeader("UI Options")) {
       ImGui::Indent();
 
-      static bool pendingUiOptionsScroll = false;
-      if (pendingUiOptionsScroll) {
+      //static bool pendingUiOptionsScroll = false;
+      if (m_pendingUIOptionsScroll) {
         ImGui::SetScrollHereY(0.0f);
-        pendingUiOptionsScroll = false;
+        m_pendingUIOptionsScroll = false;
       }
 
       {
@@ -2065,7 +2056,7 @@ namespace dxvk {
           setupStyle();
 
           // Scroll to UI Options on the next frame
-          pendingUiOptionsScroll = true;
+          m_pendingUIOptionsScroll = true;
         }
       }
 
@@ -2076,45 +2067,21 @@ namespace dxvk {
       }
 
       {
-        // Save default font
-        //static ImFont* regularFont = ImGui::GetIO().FontDefault;
-        static float regularWindowWidth = m_windowWidth;
-        static float regularUserWindowWidth = m_userWindowWidth;
-        static float regularUserWindowHeight = m_userWindowHeight;
-        static bool useLargeFont = false;
-
-        if (IMGUI_ADD_TOOLTIP(ImGui::Button(useLargeFont ? "Switch to Regular UI" : "Switch to Large UI", ImVec2(ImGui::CalcItemWidth(), 0)),
+        if (IMGUI_ADD_TOOLTIP(ImGui::Button(m_LargeUIMode ? "Switch to Regular UI" : "Switch to Large UI", ImVec2(ImGui::CalcItemWidth(), 0)),
                               "Toggles between Large and Regular GUI Scale Modes. This option will not be serialized and saved.")) {
-          ImGui::GetIO().FontDefault = useLargeFont ? m_regularFont : m_largeFont;
+          ImGui::GetIO().FontDefault = m_LargeUIMode ? m_regularFont : m_largeFont;
 
           // Can not set m_windowWidth because it will be overridden after the main tab bar ends
-          ImGui::GetCurrentWindow()->Size.x = useLargeFont ? regularWindowWidth : 670.0f;
+          ImGui::GetCurrentWindow()->Size.x = m_LargeUIMode ? m_regularWindowWidth : m_largeWindowWidth;
 
           // User menu size
-          m_userWindowWidth = useLargeFont ? regularUserWindowWidth : 776.0f;
-          m_userWindowHeight = useLargeFont ? regularUserWindowHeight : 926.0f;
+          m_userWindowWidth = m_LargeUIMode ? m_regularUserWindowWidth : m_largeUserWindowWidth;
+          m_userWindowHeight = m_LargeUIMode ? m_regularUserWindowHeight : m_largeUserWindowHeight;
 
-          useLargeFont = !useLargeFont;
-
-          // Scroll to UI Options on the next frame
-          pendingUiOptionsScroll = true;
-        }
-      }
-
-      {
-        static float uiScale = 1.0f;
-        if (IMGUI_ADD_TOOLTIP(ImGui::InputFloat("Manual UI Scale", &uiScale, 0.1f, 0.2f, "%.2f"),
-                              "A value controlling the scale of the entire GUI. This option will not be serialized and saved.")) {
-          uiScale = std::clamp(uiScale, 0.8f, 1.5f);
-
-          // "Reset" style so that we do not rescale from the last scaled value
-          setupStyle();
-
-          ImGui::GetStyle().ScaleAllSizes(uiScale);
-          ImGui::GetIO().FontGlobalScale = uiScale;
+          m_LargeUIMode = !m_LargeUIMode;
 
           // Scroll to UI Options on the next frame
-          pendingUiOptionsScroll = true;
+          m_pendingUIOptionsScroll = true;
         }
       }
 
