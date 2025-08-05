@@ -1027,6 +1027,9 @@ namespace dxvk {
     bool advancedMenuOpen = RtxOptions::showUI() == UIType::Advanced;
 
     if (ImGui::Begin("RTX Remix Developer Menu", &advancedMenuOpen, windowFlags)) {
+      // Begin handles window resize so this is fine. Do not set m_windowWidth after tabs so that tabs can modify the width
+      m_windowWidth = ImGui::GetWindowWidth();
+
       if (ImGui::Button("Graphics Settings Menu", ImVec2(ImGui::GetContentRegionAvail().x * 0.74f, 0))) {
         switchUI = (int) UIType::Basic;
       }
@@ -1080,8 +1083,6 @@ namespace dxvk {
 
         ImGui::EndTabBar();
       }
-
-      m_windowWidth = ImGui::GetWindowWidth();
     }
 
     ImGui::Dummy(ImVec2(0, 2));
@@ -1157,7 +1158,7 @@ namespace dxvk {
       // Always display memory stats to user.
       showMemoryStats();
 
-      const int itemWidth = static_cast<int>(m_LargeUIMode ? m_largeUserWindowWidgeWidth : m_regularUserWindowWidgeWidth);
+      const int itemWidth = static_cast<int>(m_largeUIMode ? m_largeUserWindowWidgeWidth : m_regularUserWindowWidgeWidth);
       const int subItemWidth = static_cast<int>(ImCeil(itemWidth * 0.86f));
       const int subItemIndent = (itemWidth > subItemWidth) ? (itemWidth - subItemWidth) : 0;
 
@@ -1773,7 +1774,7 @@ namespace dxvk {
   }
 
   void ImGUI::showDevelopmentSettings(const Rc<DxvkContext>& ctx) {
-    ImGui::PushItemWidth((m_LargeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth) + 50.0f);
+    ImGui::PushItemWidth((m_largeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth) + 50.0f);
     if (ImGui::Button("Take Screenshot")) {
       RtxContext::triggerScreenshot();
     }
@@ -2042,17 +2043,14 @@ namespace dxvk {
     if (ImGui::CollapsingHeader("UI Options")) {
       ImGui::Indent();
 
-      //static bool pendingUiOptionsScroll = false;
       if (m_pendingUIOptionsScroll) {
         ImGui::SetScrollHereY(0.0f);
         m_pendingUIOptionsScroll = false;
       }
-
+     
       {
-        ImGui::Checkbox("Compact UI", &compactGuiObject());
-        if (static bool isCompactUI = compactGui(); isCompactUI != compactGui()) {
-          // Can not use result of checkbox as options are set delayed
-          isCompactUI = compactGui();
+        if (ImGui::Checkbox("Compact UI", &m_compactUIMode)) {
+          compactGui.setDeferred(m_compactUIMode);
           setupStyle();
 
           // Scroll to UI Options on the next frame
@@ -2062,27 +2060,42 @@ namespace dxvk {
 
       ImGui::Checkbox("Always Developer Menu", &RtxOptions::defaultToAdvancedUIObject());
 
-      if (ImGui::SliderFloat("Background Alpha", &backgroundAlphaObject(), 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
-        setupStyleBackgroundColor(backgroundAlphaObject().get());
+      if (ImGui::SliderFloat("Background Alpha", &m_backgroundAlpha, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
+        backgroundAlpha.setDeferred(m_backgroundAlpha);
+        adjustStyleBackgroundAlpha(m_backgroundAlpha);
       }
 
       {
-        if (IMGUI_ADD_TOOLTIP(ImGui::Button(m_LargeUIMode ? "Switch to Regular UI" : "Switch to Large UI", ImVec2(ImGui::CalcItemWidth(), 0)),
+        if (IMGUI_ADD_TOOLTIP(ImGui::Button(m_largeUIMode ? "Switch to Regular UI" : "Switch to Large UI", ImVec2(ImGui::CalcItemWidth(), 0)),
                               "Toggles between Large and Regular GUI Scale Modes. This option will not be serialized and saved.")) {
-          ImGui::GetIO().FontDefault = m_LargeUIMode ? m_regularFont : m_largeFont;
+          m_largeUIMode = !m_largeUIMode;
 
-          // Can not set m_windowWidth because it will be overridden after the main tab bar ends
-          ImGui::GetCurrentWindow()->Size.x = m_LargeUIMode ? m_regularWindowWidth : m_largeWindowWidth;
-
-          // User menu size
-          m_userWindowWidth = m_LargeUIMode ? m_regularUserWindowWidth : m_largeUserWindowWidth;
-          m_userWindowHeight = m_LargeUIMode ? m_regularUserWindowHeight : m_largeUserWindowHeight;
-
-          m_LargeUIMode = !m_LargeUIMode;
+          ImGui::GetIO().FontDefault = m_largeUIMode ? m_largeFont : m_regularFont;
+          updateWindowWidths();
 
           // Scroll to UI Options on the next frame
           m_pendingUIOptionsScroll = true;
         }
+      }
+
+      {
+        const float indent = 60.0f;
+        ImGui::PushID("gui theme");
+        ImGui::Dummy(ImVec2(0, 2));
+        ImGui::Text("GUI Theme:");
+        ImGui::PushItemWidth(ImGui::GetContentRegionMax().x - indent);
+        if (ImGui::ListBox("", (int*)&m_currTheme, &themeNames[0], Theme::kTheme_Count, 3)) {
+          themeGui.setDeferred(m_currTheme);
+          setupStyle();
+        }
+        ImGui::PopItemWidth();
+
+        /*if (ImGui::Button("Apply##gui_theme", ImVec2(ImGui::GetContentRegionMax().x - indent, 0))) {
+          setupStyle();
+          themeGui.setDeferred(m_currTheme);
+        }*/
+
+        ImGui::PopID();
       }
 
       ImGui::Unindent();
@@ -2521,7 +2534,7 @@ namespace dxvk {
   }
 
   void ImGUI::showEnhancementsWindow(const Rc<DxvkContext>& ctx) {
-    ImGui::PushItemWidth(m_LargeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
+    ImGui::PushItemWidth(m_largeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
 
     m_capture->show(ctx);
     
@@ -2618,7 +2631,7 @@ namespace dxvk {
     if (!ImGui::BeginTabBar("##showSetupWindow", tab_bar_flags)) {
       return;
     }
-    ImGui::PushItemWidth(m_LargeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
+    ImGui::PushItemWidth(m_largeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
 
     texture_popup::lastOpenCategoryActive = false;
 
@@ -2889,24 +2902,84 @@ namespace dxvk {
     ImGui::EndTabBar();
   }
 
-  void ImGUI::setupStyleBackgroundColor(const float& alpha) {
-    ImGuiStyle* style = &ImGui::GetStyle();
-    style->Colors[ImGuiCol_WindowBg] = ImVec4(0.26f, 0.26f, 0.26f, alpha);
-    //style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, alpha);
+  void ImGUI::adjustStyleBackgroundAlpha(const float& alpha, ImGuiStyle* dst) {
+    ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
+    ImVec4& currColor = style->Colors[ImGuiCol_WindowBg];
+    currColor.w = alpha;
   }
 
-  void ImGUI::setupStyle(ImGuiStyle* dst) {
+  void ImGUI::updateWindowWidths() {
+    // Developer menu
+    m_windowWidth = m_largeUIMode ? m_largeWindowWidth : m_regularWindowWidth + (m_compactUIMode ? 0.0f : 42.0f);
+
+    // User menu popup
+    m_userWindowWidth = m_largeUIMode ? m_largeUserWindowWidth : m_regularUserWindowWidth;
+    m_userWindowHeight = m_largeUIMode ? m_largeUserWindowHeight : m_regularUserWindowHeight;
+  }
+
+  void ImGUI::setDefaultStyle(ImGuiStyle* dst) {
     ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
-    const bool isCompact = compactGui();
+
+    // Original ImGui theme from ImGuiStyle::ImGuiStyle()
+    style->Alpha = 1.0f;
+    style->DisabledAlpha = 0.60f;
+    style->WindowPadding = ImVec2(8, 8);
+    style->WindowRounding = 0.0f;
+    style->WindowBorderSize = 1.0f;
+    style->WindowMinSize = ImVec2(32, 32);
+    style->WindowTitleAlign = ImVec2(0.0f, 0.5f);
+    style->WindowMenuButtonPosition = ImGuiDir_Left;
+    style->ChildRounding = 0.0f;
+    style->ChildBorderSize = 1.0f;
+    style->PopupRounding = 0.0f;
+    style->PopupBorderSize = 1.0f;
+    style->FramePadding = m_compactUIMode ? ImVec2(4, 3) : ImVec2(7, 5);
+    style->FrameRounding = 0.0f;
+    style->FrameBorderSize = 0.0f;
+    style->ItemSpacing = m_compactUIMode ? ImVec2(8, 4) : ImVec2(3, 5);
+    style->ItemInnerSpacing = m_compactUIMode ? ImVec2(4, 4) : ImVec2(3, 8);
+    style->CellPadding = ImVec2(4, 2);
+    style->TouchExtraPadding = ImVec2(0, 0);
+    style->IndentSpacing = 21.0f;
+    style->ColumnsMinSpacing = 6.0f;
+    style->ScrollbarSize = 14.0f;
+    style->ScrollbarRounding = 9.0f;
+    style->GrabMinSize = 10.0f;
+    style->GrabRounding = 0.0f;
+    style->LogSliderDeadzone = 4.0f;
+    style->TabRounding = 4.0f;
+    style->TabBorderSize = 0.0f;
+    style->TabMinWidthForCloseButton = 0.0f;
+    style->ColorButtonPosition = ImGuiDir_Right;
+    style->ButtonTextAlign = ImVec2(0.5f, 0.5f);
+    style->SelectableTextAlign = ImVec2(0.0f, 0.0f);
+    style->DisplayWindowPadding = ImVec2(19, 19);
+    style->DisplaySafeAreaPadding = ImVec2(3, 3);
+    style->MouseCursorScale = 1.0f;
+    style->AntiAliasedLines = true;
+    style->AntiAliasedLinesUseTex = true;
+    style->AntiAliasedFill = true;
+    style->CurveTessellationTol = 1.25f;
+    style->CircleTessellationMaxError = 0.30f;
+    ImGui::StyleColorsDark(style);
+
+    // Remix changes
+    style->Colors[ImGuiCol_WindowBg] = ImVec4(0.f, 0.f, 0.f, m_backgroundAlpha);
+    style->Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.f, 0.f, 0.f, 0.4f);
+    style->TabRounding = 1;
+  }
+
+  void ImGUI::setToolkitInspiredStyle(ImGuiStyle* dst) {
+    ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
 
     style->Alpha = 1.0f;
     style->DisabledAlpha = 0.5f;
 
     style->WindowPadding = ImVec2(8.0f, 10.0f);
-    style->FramePadding = isCompact ? ImVec2(4.0f, 3.0f) : ImVec2(7.0f, 5.0f);
+    style->FramePadding = m_compactUIMode ? ImVec2(4.0f, 3.0f) : ImVec2(7.0f, 5.0f);
     style->CellPadding = ImVec2(5.0f, 4.0f);
-    style->ItemSpacing = isCompact ? ImVec2(8.0f, 4.0f) : ImVec2(3.0f, 5.0f);
-    style->ItemInnerSpacing = isCompact ? ImVec2(4.0f, 4.0f) :  ImVec2(3.0f, 8.0f);
+    style->ItemSpacing = m_compactUIMode ? ImVec2(8.0f, 4.0f) : ImVec2(3.0f, 5.0f);
+    style->ItemInnerSpacing = m_compactUIMode ? ImVec2(4.0f, 4.0f) : ImVec2(3.0f, 8.0f);
     style->IndentSpacing = 8.0f;
     style->ColumnsMinSpacing = 10.0f;
     style->ScrollbarSize = 15.0f;
@@ -2927,7 +3000,6 @@ namespace dxvk {
     style->TabRounding = 2.0f;
     style->WindowMenuButtonPosition = ImGuiDir_None;
 
-    // only here because of UI scaling
     style->WindowMinSize = ImVec2(32, 32);
     style->TouchExtraPadding = ImVec2(0, 0);
     style->LogSliderDeadzone = 4.0f;
@@ -2936,9 +3008,9 @@ namespace dxvk {
     style->DisplaySafeAreaPadding = ImVec2(3, 3);
     style->MouseCursorScale = 1.0f;
 
-    setupStyleBackgroundColor(backgroundAlpha());
+    style->Colors[ImGuiCol_WindowBg] = ImVec4(0.26f, 0.26f, 0.26f, m_backgroundAlpha);
     style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, 1.00f);
-    style->Colors[ImGuiCol_Text] = ImVec4(0.80f, 0.80f, 0.80f, 1.00f);
+    style->Colors[ImGuiCol_Text] = ImVec4(0.90f, 0.90f, 0.90f, 1.00f);
     style->Colors[ImGuiCol_TextDisabled] = ImVec4(0.44f, 0.44f, 0.44f, 1.00f);
     style->Colors[ImGuiCol_ChildBg] = ImVec4(0.19f, 0.19f, 0.19f, 0.80f);
     style->Colors[ImGuiCol_Border] = ImVec4(0.31f, 0.31f, 0.31f, 1.00f);
@@ -2958,8 +3030,8 @@ namespace dxvk {
     style->Colors[ImGuiCol_SliderGrab] = ImVec4(1.00f, 1.00f, 1.00f, 0.39f);
     style->Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.00f, 1.00f, 1.00f, 0.31f);
     style->Colors[ImGuiCol_Button] = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
-    style->Colors[ImGuiCol_ButtonHovered] = ImVec4(0.24f, 0.24f, 0.24f, 1.00f);
-    style->Colors[ImGuiCol_ButtonActive] = ImVec4(0.40f, 0.45f, 0.45f, 1.00f);
+    style->Colors[ImGuiCol_ButtonHovered] = ImVec4(0.17f, 0.25f, 0.27f, 0.78f);
+    style->Colors[ImGuiCol_ButtonActive] = ImVec4(0.21f, 0.30f, 0.33f, 0.78f);
     style->Colors[ImGuiCol_Header] = ImVec4(0.02f, 0.02f, 0.02f, 0.39f);
     style->Colors[ImGuiCol_HeaderHovered] = ImVec4(0.17f, 0.25f, 0.27f, 0.78f);
     style->Colors[ImGuiCol_HeaderActive] = ImVec4(0.17f, 0.25f, 0.27f, 0.78f);
@@ -2988,6 +3060,98 @@ namespace dxvk {
     style->Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     style->Colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     style->Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.56f);
+  }
+
+  void ImGUI::setNvidiaInspiredStyle(ImGuiStyle* dst) {
+    ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
+
+    // Based on default theme
+    setDefaultStyle(style);
+
+    style->Colors[ImGuiCol_Text] = ImVec4(0.91f, 0.91f, 0.91f, 1.00f);
+    style->Colors[ImGuiCol_TextDisabled] = ImVec4(0.44f, 0.44f, 0.44f, 1.00f);
+    style->Colors[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.10f, 0.10f, 0.90f);
+    style->Colors[ImGuiCol_ChildBg] = ImVec4(0.19f, 0.19f, 0.19f, 0.80f);
+    style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, 1.00f);
+    style->Colors[ImGuiCol_Border] = ImVec4(0.31f, 0.31f, 0.31f, 0.20f);
+    style->Colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.23f);
+    style->Colors[ImGuiCol_FrameBg] = ImVec4(0.19f, 0.19f, 0.19f, 1.00f);
+    style->Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.33f, 0.47f, 0.08f, 1.00f);
+    style->Colors[ImGuiCol_FrameBgActive] = ImVec4(0.46f, 0.73f, 0.00f, 1.00f);
+    style->Colors[ImGuiCol_TitleBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.98f);
+    style->Colors[ImGuiCol_TitleBgActive] = ImVec4(0.15f, 0.15f, 0.15f, 0.98f);
+    style->Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.15f, 0.15f, 0.15f, 0.98f);
+    style->Colors[ImGuiCol_MenuBarBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    style->Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.24f);
+    style->Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.34f, 0.34f, 0.34f, 0.39f);
+    style->Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.54f, 0.54f, 0.54f, 0.47f);
+    style->Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.78f, 0.78f, 0.78f, 0.33f);
+    style->Colors[ImGuiCol_CheckMark] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
+    style->Colors[ImGuiCol_SliderGrab] = ImVec4(1.00f, 1.00f, 1.00f, 0.39f);
+    style->Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.00f, 1.00f, 1.00f, 0.31f);
+    style->Colors[ImGuiCol_Button] = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
+    style->Colors[ImGuiCol_ButtonHovered] = ImVec4(0.33f, 0.47f, 0.08f, 1.00f);
+    style->Colors[ImGuiCol_ButtonActive] = ImVec4(0.46f, 0.73f, 0.00f, 1.00f);
+    style->Colors[ImGuiCol_Header] = ImVec4(0.13f, 0.13f, 0.13f, 1.00f);
+    style->Colors[ImGuiCol_HeaderHovered] = ImVec4(0.33f, 0.47f, 0.08f, 1.00f);
+    style->Colors[ImGuiCol_HeaderActive] = ImVec4(0.33f, 0.47f, 0.08f, 1.00f);
+    style->Colors[ImGuiCol_Separator] = ImVec4(0.35f, 0.35f, 0.35f, 1.00f);
+    style->Colors[ImGuiCol_SeparatorHovered] = ImVec4(0.32f, 0.46f, 0.06f, 1.00f);
+    style->Colors[ImGuiCol_SeparatorActive] = ImVec4(0.46f, 0.73f, 0.00f, 1.00f);
+    style->Colors[ImGuiCol_ResizeGrip] = ImVec4(0.43f, 0.43f, 0.43f, 0.51f);
+    style->Colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.32f, 0.46f, 0.06f, 1.00f);
+    style->Colors[ImGuiCol_ResizeGripActive] = ImVec4(0.46f, 0.73f, 0.00f, 1.00f);
+    style->Colors[ImGuiCol_Tab] = ImVec4(0.00f, 0.00f, 0.00f, 0.37f);
+    style->Colors[ImGuiCol_TabHovered] = ImVec4(0.32f, 0.46f, 0.06f, 1.00f);
+    style->Colors[ImGuiCol_TabActive] = ImVec4(0.46f, 0.73f, 0.00f, 1.00f);
+    style->Colors[ImGuiCol_TabUnfocused] = ImVec4(0.00f, 0.00f, 0.00f, 0.16f);
+    style->Colors[ImGuiCol_TabUnfocusedActive] = ImVec4(1.00f, 1.00f, 1.00f, 0.24f);
+    style->Colors[ImGuiCol_PlotLines] = ImVec4(1.00f, 1.00f, 1.00f, 0.35f);
+    style->Colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
+    style->Colors[ImGuiCol_PlotHistogram] = ImVec4(1.00f, 1.00f, 1.00f, 0.35f);
+    style->Colors[ImGuiCol_PlotHistogramHovered] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
+    style->Colors[ImGuiCol_TableHeaderBg] = ImVec4(0.16f, 0.16f, 0.16f, 1.00f);
+    style->Colors[ImGuiCol_TableBorderStrong] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
+    style->Colors[ImGuiCol_TableBorderLight] = ImVec4(0.00f, 0.00f, 0.00f, 0.54f);
+    style->Colors[ImGuiCol_TableRowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.39f);
+    style->Colors[ImGuiCol_TableRowBgAlt] = ImVec4(0.46f, 0.73f, 0.00f, 1.00f);
+    style->Colors[ImGuiCol_TextSelectedBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
+    style->Colors[ImGuiCol_DragDropTarget] = ImVec4(0.00f, 0.51f, 0.39f, 0.31f);
+    style->Colors[ImGuiCol_NavHighlight] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    style->Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
+    style->Colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
+    style->Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.56f);
+  }
+
+  void ImGUI::setupStyle(ImGuiStyle* dst) {
+    if (!m_init) {
+      m_compactUIMode = compactGui.get();
+      m_backgroundAlpha = backgroundAlpha.get();
+      m_currTheme = (Theme)themeGui.get();
+    }
+
+    updateWindowWidths();
+   
+    ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
+    switch (m_currTheme)
+    {
+    default:
+    case kTheme_Default:
+      m_backgroundAlpha = 0.6f;
+      setDefaultStyle(style);
+      break;
+    case kTheme_Toolkit:
+      m_backgroundAlpha = 0.9f;
+      setToolkitInspiredStyle(style);
+      break;
+    case kTheme_Nvidia:
+      m_backgroundAlpha = 0.8f;
+      setNvidiaInspiredStyle(style);
+      break;
+    case kTheme_Count:
+      assert(false && "kTheme_Count hit in ImGUI::setupStyle");
+      break;
+    }
   }
 
   void ImGUI::showVsyncOptions(bool enableDLFGGuard) {
@@ -3225,7 +3389,7 @@ namespace dxvk {
   }
 
   void ImGUI::showRenderingSettings(const Rc<DxvkContext>& ctx) {
-    ImGui::PushItemWidth(m_LargeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
+    ImGui::PushItemWidth(m_largeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
     auto common = ctx->getCommonObjects();
 
     ImGui::Text("Disclaimer: The following settings are intended for developers,\nchanging them may introduce instability.");

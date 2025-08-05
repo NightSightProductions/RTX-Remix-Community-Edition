@@ -128,7 +128,7 @@ namespace dxvk {
       Ok,
       Error
     };
-    
+
     DxvkDevice*           m_device;
     
     Rc<DxvkImage>         m_fontTexture;
@@ -152,29 +152,40 @@ namespace dxvk {
 
 
     // Width of developer menu in regular mode
-    static constexpr float m_regularWindowWidth = 492.f;
+    float                 m_regularWindowWidth = 450.0f;
     // Width of item+label widgets in regular mode (developer menu)
-    static constexpr float m_regularWindowWidgetWidth = 200.f;
+    float                 m_regularWindowWidgetWidth = 200.f;
 
     // Width of developer menu in large mode
-    static constexpr float m_largeWindowWidth = 670.0f;
+    float                 m_largeWindowWidth = 670.0f;
     // Width of item+label widgets in large mode (developer menu)
-    static constexpr float m_largeWindowWidgetWidth = 364.0f;
+    float                 m_largeWindowWidgetWidth = 364.0f;
 
-    static constexpr float m_regularUserWindowWidth = 600.f;
-    static constexpr float m_regularUserWindowHeight = 720.f;
+    float                 m_regularUserWindowWidth = 600.f;
+    float                 m_regularUserWindowHeight = 720.f;
     // Width of item+label widgets in regular mode (user menu)
-    static constexpr float m_regularUserWindowWidgeWidth = 140.f;
+    float                 m_regularUserWindowWidgeWidth = 140.f;
 
-    static constexpr float m_largeUserWindowWidth = 776.0f;
-    static constexpr float m_largeUserWindowHeight = 926.0f;
+    float                 m_largeUserWindowWidth = 776.0f;
+    float                 m_largeUserWindowHeight = 926.0f;
     // Width of item+label widgets in large mode
-    static constexpr float m_largeUserWindowWidgeWidth = 252.f;
-    
+    float                 m_largeUserWindowWidgeWidth = 252.f;
 
     bool                  m_windowOnRight = true;
-    bool                  m_LargeUIMode = false;
+    bool                  m_compactUIMode = true;
+    bool                  m_largeUIMode = false;
     bool                  m_pendingUIOptionsScroll = false;
+
+    static constexpr const char* themeNames[] = { "Default", "Toolkit Inspired", "Nvidia Inspired" };
+    enum Theme {
+      kTheme_Default = 0,
+      kTheme_Toolkit,
+      kTheme_Nvidia,
+      kTheme_Count
+    };
+    Theme                 m_currTheme = kTheme_Default;
+    float                 m_backgroundAlpha = 0.8f;
+
     float                 m_windowWidth = m_regularWindowWidth;
     float                 m_userWindowWidth = m_regularUserWindowWidth;
     float                 m_userWindowHeight = m_regularUserWindowHeight;
@@ -251,12 +262,20 @@ namespace dxvk {
 
     void createFontsTexture(const Rc<DxvkContext>& ctx);
 
-    void setupStyleBackgroundColor(const float& alpha);
-
+    // Adjust Alpha of currently set background color
+    void adjustStyleBackgroundAlpha(const float& alpha, ImGuiStyle* dst = NULL);
+    // Adjusts window widths based on various UI settings
+    void updateWindowWidths();
+    // Sets default remix UI theme
+    void setDefaultStyle(ImGuiStyle* dst);
+    // Sets toolkit inspired UI theme
+    void setToolkitInspiredStyle(ImGuiStyle* dst);
+    // Sets Nvidia inspired UI theme
+    void setNvidiaInspiredStyle(ImGuiStyle* dst);
     // Custom style
     void setupStyle(ImGuiStyle* dst = NULL);
-    void showVsyncOptions(bool enableDLFGGuard);
 
+    void showVsyncOptions(bool enableDLFGGuard);
     void processHotkeys();
 
     void showMemoryStats() const;
@@ -267,8 +286,9 @@ namespace dxvk {
     RTX_OPTION("rtx.gui", std::uint32_t, hudMessageAnimatedDotDurationMilliseconds, 1000, "A duration in milliseconds between each dot in the animated dot sequence for HUD messages. Must be greater than 0.\nThese dots help indicate progress is happening to the user with a bit of animation which can be configured to animate at whatever speed is desired.");
     RTX_OPTION("rtx.gui", float, reflexStatRangeInterpolationRate, 0.05f, "A value controlling the interpolation rate applied to the Reflex stat graph ranges for smoother visualization.");
     RTX_OPTION("rtx.gui", float, reflexStatRangePaddingRatio, 0.05f, "A value specifying the amount of padding applied to the Reflex stat graph ranges as a ratio to the calculated range.");
-    RTX_OPTION("rtx.gui", bool, compactGui, false, "A setting to toggle between compact and spacious GUI modes.");
+    RTX_OPTION("rtx.gui", bool, compactGui, true, "A setting to toggle between compact and spacious GUI modes.");
     RTX_OPTION("rtx.gui", float, backgroundAlpha, 0.90f, "A value controlling the alpha of the GUI background.");
+    RTX_OPTION("rtx.gui", int, themeGui, (int)Theme::kTheme_Default, "A setting controlling the active GUI theme.");
 
     void onCloseMenus();
     void onOpenMenus();
