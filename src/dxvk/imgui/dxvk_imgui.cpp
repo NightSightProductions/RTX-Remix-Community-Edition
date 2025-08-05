@@ -3137,15 +3137,21 @@ namespace dxvk {
     {
     default:
     case kTheme_Default:
-      m_backgroundAlpha = 0.6f;
+      if (m_init) {
+        m_backgroundAlpha = 0.6f;
+      }
       setDefaultStyle(style);
       break;
     case kTheme_Toolkit:
-      m_backgroundAlpha = 0.9f;
+      if (m_init) {
+        m_backgroundAlpha = 0.9f;
+      }
       setToolkitInspiredStyle(style);
       break;
     case kTheme_Nvidia:
-      m_backgroundAlpha = 0.8f;
+      if (m_init) {
+        m_backgroundAlpha = 0.8f;
+      }
       setNvidiaInspiredStyle(style);
       break;
     case kTheme_Count:
