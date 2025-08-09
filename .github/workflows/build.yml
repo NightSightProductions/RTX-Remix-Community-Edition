@@ -1,10 +1,12 @@
 name: Build
 
 on:
+  workflow_dispatch: {}
+  
   push:
-    branches: [ FSR, 'release/**' ]
+    branches: [ main, 'release/**' ]
   pull_request:
-    branches: [ FSR, 'release/**' ]
+    branches: [ main, 'release/**' ]
 
 jobs:
   build-windows:
