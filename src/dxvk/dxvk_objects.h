@@ -45,6 +45,7 @@
 #include "rtx_render/rtx_dlss.h"
 #include "rtx_render/rtx_nis.h"
 #include "rtx_render/rtx_taa.h"
+#include "rtx_render/rtx_fsr.h"
 #include "rtx_render/rtx_auto_exposure.h"
 #include "rtx_render/rtx_tone_mapping.h"
 #include "rtx_render/rtx_local_tone_mapping.h"
@@ -221,6 +222,10 @@ namespace dxvk {
       return m_taa.get();
     }
 
+    DxvkFSR& metaFSR() {
+      return m_fsr.get();
+    }
+
     CompositePass& metaComposite() {
       return m_composite.get();
     }
@@ -368,6 +373,7 @@ namespace dxvk {
     Active<DxvkRayReconstruction>           m_rayReconstruction;
     Active<DxvkNIS>                         m_nis;
     Active<DxvkTemporalAA>                  m_taa;
+    Active<DxvkFSR>                         m_fsr;
     Active<CompositePass>                   m_composite;
     Active<DebugView>                       m_debug_view;
     Active<DxvkAutoExposure>                m_autoExposure;

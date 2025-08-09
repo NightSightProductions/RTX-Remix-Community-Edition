@@ -332,6 +332,7 @@ namespace dxvk {
       {UpscalerType::None, "None"},
       {UpscalerType::NIS, "NIS"},
       {UpscalerType::TAAU, "TAA-U"},
+      {UpscalerType::FSR, "FSR"},
   } });
 
   static auto upscalerDLSSCombo = ImGui::ComboWithKey<UpscalerType>(
@@ -341,6 +342,7 @@ namespace dxvk {
       {UpscalerType::DLSS, "DLSS"},
       {UpscalerType::NIS, "NIS"},
       {UpscalerType::TAAU, "TAA-U"},
+      {UpscalerType::FSR, "FSR"},
   } });
 
   ImGui::ComboWithKey<DlssPreset> dlssPresetCombo{
@@ -382,6 +384,18 @@ namespace dxvk {
         {TaauPreset::Balanced, "Balanced"},
         {TaauPreset::Quality, "Quality"},
         {TaauPreset::Fullscreen, "Fullscreen"},
+    } }
+  };
+
+  ImGui::ComboWithKey<FSRMode> fsrModeCombo {
+    "FSR Mode",
+    ImGui::ComboWithKey<FSRMode>::ComboEntries { {
+        {FSRMode::Off, "Off"},
+        {FSRMode::UltraPerformance, "Ultra Performance"},
+        {FSRMode::Performance, "Performance"},
+        {FSRMode::Balanced, "Balanced"},
+        {FSRMode::Quality, "Quality"},
+        {FSRMode::NativeAA, "Native Anti-Aliasing"}
     } }
   };
 
@@ -467,6 +481,7 @@ namespace dxvk {
       { RtxFramePassStage::DLSSRR, "DLSSRR" },
       { RtxFramePassStage::NIS, "NIS" },
       { RtxFramePassStage::TAA, "TAA" },
+
       { RtxFramePassStage::DustParticles, "DustParticles" },
       { RtxFramePassStage::Bloom, "Bloom" },
       { RtxFramePassStage::PostFX, "PostFX" },
@@ -1349,6 +1364,17 @@ namespace dxvk {
           auto resolutionScale = RtxOptions::resolutionScale();
 
           ImGui::TextWrapped(str::format("TAA-U Resolution Scale: ", resolutionScale).c_str());
+
+          break;
+        }
+        case UpscalerType::FSR: {
+          m_userGraphicsSettingChanged |= fsrModeCombo.getKey(&RtxOptions::fsrModeObject());
+
+          // Display FSR Upscaling Information
+
+          auto resolutionScale = RtxOptions::resolutionScale();
+
+          ImGui::TextWrapped(str::format("FSR Resolution Scale: ", resolutionScale).c_str());
 
           break;
         }
@@ -3096,6 +3122,17 @@ namespace dxvk {
         ImGui::SliderFloat("Sharpness", &ctx->getCommonObjects()->metaNIS().m_sharpness, 0.1f, 1.0f);
         ImGui::Checkbox("Use FP16", &ctx->getCommonObjects()->metaNIS().m_useFp16);
       } else if (RtxOptions::upscalerType() == UpscalerType::TAAU) {
+      } else if (RtxOptions::upscalerType() == UpscalerType::FSR) {
+        fsrModeCombo.getKey(&RtxOptions::fsrModeObject());
+
+        // Display FSR Upscaling Information
+        auto& FSR = ctx->getCommonObjects()->metaFSR();
+
+        uint32_t inputWidth;
+        uint32_t inputHeight;
+        ImGui::TextWrapped(str::format("FSR Input Resolution: ", inputWidth, "x", inputHeight).c_str());
+
+        } else if (RtxOptions::upscalerType() == UpscalerType::TAAU) {
         ImGui::SliderFloat("Resolution scale", &RtxOptions::resolutionScaleObject(), 0.5f, 1.0f);
       }
 
