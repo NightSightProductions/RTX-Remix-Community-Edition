@@ -2,9 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [ main, 'release/**' ]
+    branches: [ FSR, 'release/**' ]
   pull_request:
-    branches: [ main, 'release/**' ]
+    branches: [ FSR, 'release/**' ]
 
 jobs:
   build-windows:
