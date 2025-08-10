@@ -157,6 +157,20 @@ namespace dxvk {
         }
         break;
       }
+      case UpscalerType::FSR: {
+        // Map FSR mode to a resolution scale for now (placeholder until full FFX integration)
+        float fsrScale = 1.0f;
+        switch (RtxOptions::fsrMode()) {
+          case FSRMode::UltraPerformance: fsrScale = 0.3333f; break;
+          case FSRMode::Performance:      fsrScale = 0.5f;    break;
+          case FSRMode::Balanced:         fsrScale = 0.58f;   break;
+          case FSRMode::Quality:          fsrScale = 0.6667f; break;
+          case FSRMode::NativeAA:         fsrScale = 1.0f;    break;
+          case FSRMode::Off:              fsrScale = 1.0f;    break;
+        }
+        RtxOptions::resolutionScale.setDeferred(fsrScale);
+        break;
+      }
       default:
         break;
     }

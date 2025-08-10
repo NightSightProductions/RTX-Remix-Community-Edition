@@ -213,6 +213,8 @@ dxvk_src = files([
   'rtx_render/rtx_dlfg.h',
   'rtx_render/rtx_dlss.cpp', 
   'rtx_render/rtx_dlss.h',
+  'rtx_render/rtx_fsr.cpp',
+  'rtx_render/rtx_fsr.h',
   'rtx_render/rtx_draw_call_cache.cpp',
   'rtx_render/rtx_draw_call_cache.h',
   'rtx_render/rtx_env.cpp',
@@ -401,10 +403,14 @@ dlss_dep = declare_dependency(
   include_directories : [ dlss_include_dir, dlfg_include_dir ]
 )
 
-# FSR dependency - using direct library path
-fsr_lib_path = join_paths(global_src_root_norm, 'submodules/fsr/lib')
-fsr_lib = cc.find_library('libfsr', dirs : fsr_lib_path, required : false)
-fsr_dep = declare_dependency(dependencies : [ fsr_lib ])
+# FSR dependency - FidelityFX SDK (headers + optional prebuilt Vulkan lib)
+fsr_include_dir = include_directories(join_paths('../../', 'submodules', 'FidelityFX-SDK', 'ffx-api', 'include'))
+fsr_lib_path = join_paths(global_src_root_norm, 'submodules', 'FidelityFX-SDK', 'PrebuiltSignedDLL')
+fsr_lib = cc.find_library('amd_fidelityfx_vk', dirs : fsr_lib_path, required : false)
+fsr_dep = declare_dependency(
+  dependencies : [ fsr_lib ],
+  include_directories : [ fsr_include_dir ]
+)
 
 nrc_dll_path = join_paths(meson.global_source_root(), 'submodules/nrc/bin/')
 nrc_lib_path = join_paths(meson.global_source_root(), 'submodules/nrc/lib/')

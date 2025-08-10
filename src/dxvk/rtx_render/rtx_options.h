@@ -64,7 +64,8 @@ namespace dxvk {
     None = 0,
     DLSS,
     NIS,
-    TAAU
+  TAAU,
+  FSR
   };
 
   enum class GraphicsPreset : int {
@@ -102,6 +103,15 @@ namespace dxvk {
     Balanced,
     Quality,
     Fullscreen
+  };
+
+  enum class FSRMode : int {
+    Off = 0,
+    UltraPerformance,
+    Performance,
+    Balanced,
+    Quality,
+    NativeAA
   };
 
   enum class CameraAnimationMode : int {
@@ -289,6 +299,7 @@ namespace dxvk {
     RTX_OPTION("rtx", bool, skipDrawCallsPostRTXInjection, false, "Ignores all draw calls recorded after RTX Injection, the location of which varies but is currently based on when tagged UI textures begin to draw.");
     RTX_OPTION_ENV("rtx", DlssPreset, dlssPreset, DlssPreset::On, "RTX_DLSS_PRESET", "Combined DLSS Preset for quickly controlling Upscaling, Frame Interpolation and Latency Reduction.");
     RTX_OPTION("rtx", NisPreset, nisPreset, NisPreset::Balanced, "Adjusts NIS scaling factor, trades quality for performance.");
+  RTX_OPTION("rtx", FSRMode, fsrMode, FSRMode::Balanced, "Selects the FSR 3 quality mode.");
     RTX_OPTION("rtx", TaauPreset, taauPreset, TaauPreset::Balanced,  "Adjusts TAA-U scaling factor, trades quality for performance.");
     RTX_OPTION_ENV("rtx", GraphicsPreset, graphicsPreset, GraphicsPreset::Auto, "DXVK_GRAPHICS_PRESET_TYPE", "Overall rendering preset, higher presets result in higher image quality, lower presets result in better performance.");
     RTX_OPTION_ENV("rtx", RaytraceModePreset, raytraceModePreset, RaytraceModePreset::Auto, "DXVK_RAYTRACE_MODE_PRESET_TYPE", "");

@@ -166,6 +166,7 @@ namespace dxvk {
       DLSS,
       NIS,
       TAAU,
+  FSR,
       DLSS_RR,
     };
 
@@ -192,6 +193,7 @@ namespace dxvk {
     void dispatchComposite(const Resources::RaytracingOutput& rtOutput);
     void dispatchReplaceCompositeWithDebugView(const Resources::RaytracingOutput& rtOutput);
     void dispatchNIS(const Resources::RaytracingOutput& rtOutput);
+  void dispatchFSR(const Resources::RaytracingOutput& rtOutput);
     void dispatchTemporalAA(const Resources::RaytracingOutput& rtOutput);
     void dispatchToneMapping(const Resources::RaytracingOutput& rtOutput, bool performSRGBConversion);
     void dispatchBloom(const Resources::RaytracingOutput& rtOutput);
@@ -232,7 +234,8 @@ namespace dxvk {
     bool shouldUseRayReconstruction() const;
     bool shouldUseNIS() const;
     bool shouldUseTAA() const;
-    bool shouldUseUpscaler() const { return shouldUseDLSS() || shouldUseNIS() || shouldUseTAA(); }
+  bool shouldUseFSR() const;
+  bool shouldUseUpscaler() const { return shouldUseDLSS() || shouldUseNIS() || shouldUseTAA() || shouldUseFSR(); }
 
     inline static bool s_triggerScreenshot = false;
     inline static bool s_triggerUsdCapture = false;

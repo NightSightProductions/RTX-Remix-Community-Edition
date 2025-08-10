@@ -3126,11 +3126,11 @@ namespace dxvk {
         fsrModeCombo.getKey(&RtxOptions::fsrModeObject());
 
         // Display FSR Upscaling Information
-        auto& FSR = ctx->getCommonObjects()->metaFSR();
-
-        uint32_t inputWidth;
-        uint32_t inputHeight;
-        ImGui::TextWrapped(str::format("FSR Input Resolution: ", inputWidth, "x", inputHeight).c_str());
+  auto& fsr = ctx->getCommonObjects()->metaFSR();
+  uint32_t inputWidth = 0;
+  uint32_t inputHeight = 0;
+  fsr.getInputSize(inputWidth, inputHeight);
+  ImGui::TextWrapped(str::format("FSR Render Resolution: ", inputWidth, "x", inputHeight).c_str());
 
         } else if (RtxOptions::upscalerType() == UpscalerType::TAAU) {
         ImGui::SliderFloat("Resolution scale", &RtxOptions::resolutionScaleObject(), 0.5f, 1.0f);

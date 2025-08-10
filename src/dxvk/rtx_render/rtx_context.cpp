@@ -234,6 +234,14 @@ namespace dxvk {
       downscaleExtent.width = renderSize[0];
       downscaleExtent.height = renderSize[1];
       downscaleExtent.depth = 1;
+    } else if (shouldUseFSR()) {
+      DxvkFSR& fsr = m_common->metaFSR();
+      uint32_t displaySize[2] = { upscaleExtent.width, upscaleExtent.height };
+      uint32_t renderSize[2] = { 0, 0 };
+      fsr.setSetting(displaySize, RtxOptions::fsrMode(), renderSize);
+      downscaleExtent.width = renderSize[0];
+      downscaleExtent.height = renderSize[1];
+      downscaleExtent.depth = 1;
     } else if (shouldUseNIS() || shouldUseTAA()) {
       auto resolutionScale = RtxOptions::resolutionScale();
       downscaleExtent.width = uint32_t(std::roundf(upscaleExtent.width * resolutionScale));
@@ -293,6 +301,8 @@ namespace dxvk {
       return InternalUpscaler::DLSS_RR;
     } else if (shouldUseNIS()) {
       return InternalUpscaler::NIS;
+    } else if (shouldUseFSR()) {
+      return InternalUpscaler::TAAU; // temporary: reuse TAA upscaler until FSR compute is wired
     } else if (shouldUseTAA()) {
       return InternalUpscaler::TAAU;
     } else {
@@ -616,6 +626,8 @@ namespace dxvk {
           dispatchRayReconstruction(rtOutput);
         } else if (m_currentUpscaler == InternalUpscaler::NIS) {
           dispatchNIS(rtOutput);
+        } else if (m_currentUpscaler == InternalUpscaler::FSR) {
+          dispatchFSR(rtOutput);
         } else if (m_currentUpscaler == InternalUpscaler::TAAU){
           dispatchTemporalAA(rtOutput);
         } else {
@@ -1561,6 +1573,12 @@ namespace dxvk {
     m_common->metaNIS().dispatch(this, rtOutput);
   }
 
+  void RtxContext::dispatchFSR(const Resources::RaytracingOutput& rtOutput) {
+    ScopedGpuProfileZone(this, "FSR");
+    setFramePassStage(RtxFramePassStage::NIS); // reuse stage category until a dedicated one exists
+    m_common->metaFSR().dispatch(this, rtOutput, m_resetHistory);
+  }
+
   void RtxContext::dispatchTemporalAA(const Resources::RaytracingOutput& rtOutput) {
     ScopedGpuProfileZone(this, "TAA");
     setFramePassStage(RtxFramePassStage::TAA);
@@ -2091,6 +2109,10 @@ namespace dxvk {
 
   bool RtxContext::shouldUseTAA() const {
     return RtxOptions::isTAAEnabled();
+  }
+
+  bool RtxContext::shouldUseFSR() const {
+    return RtxOptions::upscalerType() == UpscalerType::FSR;
   }
 
   D3D9RtxVertexCaptureData& RtxContext::allocAndMapVertexCaptureConstantBuffer() {
