@@ -10,9 +10,9 @@
 #include "rtx_options.h"
 
 // FidelityFX SDK (FFX API)
-#include <ffx_api/ffx_api.hpp>
-#include <ffx_api/ffx_upscale.hpp>
-#include <ffx_api/vk/ffx_api_vk.hpp>
+#include "../../../submodules/ffx_api/include/ffx_api/ffx_api.hpp"
+#include "../../../submodules/ffx_api/include/ffx_api/ffx_upscale.hpp"
+#include "../../../submodules/ffx_api/include/ffx_api/vk/ffx_api_vk.hpp"
 
 namespace dxvk {
 
