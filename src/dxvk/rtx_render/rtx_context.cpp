@@ -302,7 +302,7 @@ namespace dxvk {
     } else if (shouldUseNIS()) {
       return InternalUpscaler::NIS;
     } else if (shouldUseFSR()) {
-      return InternalUpscaler::TAAU; // temporary: reuse TAA upscaler until FSR compute is wired
+      return InternalUpscaler::FSR;
     } else if (shouldUseTAA()) {
       return InternalUpscaler::TAAU;
     } else {
