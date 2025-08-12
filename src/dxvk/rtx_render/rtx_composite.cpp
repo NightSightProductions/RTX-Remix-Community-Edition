@@ -472,6 +472,10 @@ namespace dxvk {
     // Bitwise and used rather than modulus as well for slightly better performance.
     compositeArgs.timeSinceStartMS = static_cast<uint32_t>(GlobalTime::get().absoluteTimeMs()) & ((1U << 24U) - 1U);
     
+    // HDR and UI Processing arguments
+    const bool hdrEnabled = m_device->getCommon()->metaToneMapping().enableHDR();
+    compositeArgs.enableHDR = hdrEnabled;
+
     RayPortalManager::SceneData portalData = sceneManager.getRayPortalManager().getRayPortalInfoSceneData();
     compositeArgs.numActiveRayPortals = portalData.numActiveRayPortals;
     memcpy(&compositeArgs.rayPortalHitInfos[0], &portalData.rayPortalHitInfos, sizeof(portalData.rayPortalHitInfos));

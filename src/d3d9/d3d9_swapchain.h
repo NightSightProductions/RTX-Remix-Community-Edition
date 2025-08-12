@@ -267,6 +267,14 @@ namespace dxvk {
     HWND getWinProcHwnd() const { return getPresentationHwnd() ? getPresentationHwnd() : getFocusHwnd(); }
     void HookWindowProc(HWND window);
     // NV-DXVK end
+
+    // HDR tracking (per swapchain)
+    bool                      m_hdrStateInitialized = false;
+    bool                      m_prevHdrEnabled = false;
+    uint32_t                  m_prevHdrFormat = 0;
+    float                     m_prevHdrMaxLuminance = 0.0f;
+    float                     m_prevHdrMinLuminance = 0.0f;
+    float                     m_prevHdrPaperWhiteLuminance = 0.0f;
   };
 
   class D3D9SwapchainExternal final : public D3D9SwapChainEx {

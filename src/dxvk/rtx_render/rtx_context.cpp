@@ -1647,25 +1647,53 @@ namespace dxvk {
       getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER),
       rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion);
 
+    // Check if HDR is enabled
+    const bool hdrEnabled = isHDREnabled();
+    
     // We don't reset history for tonemapper on m_resetHistory for easier comparison when toggling raytracing modes.
     // The tone curve shouldn't be too different between raytracing modes, 
     // but the reset of denoised buffers causes wide tone curve differences
     // until it converges and thus making comparison of raytracing mode outputs more difficult
     setFramePassStage(RtxFramePassStage::ToneMapping);
-    if (RtxOptions::tonemappingMode() == TonemappingMode::Global) {
+    
+    if (hdrEnabled) {
+      // HDR Mode: Use native HDR processing (bypass SDR tone mapping entirely)
       DxvkToneMapping& toneMapper = m_common->metaToneMapping();
-      toneMapper.dispatch(this, 
+      
+      // Apply HDR processing directly to the composite output
+      toneMapper.dispatchHDRProcessing(this,
         getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER),
         autoExposure.getExposureTexture().view,
-        rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion, autoExposure.enabled());
+        rtOutput.m_finalOutput.resource(Resources::AccessType::Read),
+        rtOutput.m_finalOutput.resource(Resources::AccessType::Write),
+        GlobalTime::get().deltaTimeMs(),
+        autoExposure.enabled());
+    } else {
+      // SDR Mode: Apply the selected tonemapping mode
+      if (RtxOptions::tonemappingMode() == TonemappingMode::Global) {
+        DxvkToneMapping& toneMapper = m_common->metaToneMapping();
+        
+        toneMapper.dispatch(this, 
+          getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER),
+          autoExposure.getExposureTexture().view,
+          rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion, autoExposure.enabled());
+      } else {
+        // Local tonemapping mode
+        DxvkLocalToneMapping& localTonemapper = m_common->metaLocalToneMapping();
+        if (localTonemapper.isActive()) {
+          localTonemapper.dispatch(this,
+            getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
+            autoExposure.getExposureTexture().view,
+            rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion, autoExposure.enabled());
+        }
+      }
     }
-    DxvkLocalToneMapping& localTonemapper = m_common->metaLocalToneMapping();
-    if (localTonemapper.isActive()) {
-      localTonemapper.dispatch(this,
-        getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
-        autoExposure.getExposureTexture().view,
-        rtOutput, GlobalTime::get().deltaTimeMs(), performSRGBConversion, autoExposure.enabled());
-    }
+  }
+
+  bool RtxContext::isHDREnabled() const {
+    // HDR is considered enabled when the tone mapping module has HDR output toggled on
+    // Additional platform/display capability checks can be added here if needed
+    return m_common->metaToneMapping().enableHDR();
   }
 
   void RtxContext::dispatchBloom(const Resources::RaytracingOutput& rtOutput) {

@@ -112,4 +112,9 @@ struct CompositeArgs {
 
   vec3 clearColorFinalColor;
   uint timeSinceStartMS;
+  
+  // HDR and UI Processing
+  uint enableHDR;
+  uint detectUITextures;
+  uint separateUIProcessing;
 };

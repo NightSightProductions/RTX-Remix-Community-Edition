@@ -43,6 +43,11 @@
 #define TONEMAPPING_APPLY_TONEMAPPING_EXPOSURE_INPUT       3
 #define TONEMAPPING_APPLY_TONEMAPPING_COLOR_OUTPUT         4
 
+#define HDR_PROCESSING_BLUE_NOISE_TEXTURE                  0
+#define HDR_PROCESSING_INPUT_BUFFER                        1
+#define HDR_PROCESSING_OUTPUT_BUFFER                       2  
+#define HDR_PROCESSING_EXPOSURE_INPUT                      3
+
 #define TONEMAPPING_TONE_CURVE_SAMPLE_COUNT               256
 
 #define EXPOSURE_HISTOGRAM_SIZE                           256

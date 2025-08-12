@@ -652,6 +652,69 @@ namespace dxvk::vk {
     m_vki->vkDestroySurfaceKHR(m_vki->instance(), m_surface, nullptr);
   }
 
+
+  void Presenter::setHdrMetadata(
+          bool      hdrEnabled,
+          uint32_t  hdrFormat,
+          float     maxLuminance,
+          float     minLuminance,
+          float     paperWhiteLuminance) {
+    // Only set HDR metadata if HDR is enabled and we have a valid swapchain
+    if (!hdrEnabled || !m_swapchain) {
+      return;
+    }
+
+    #ifdef VK_EXT_hdr_metadata
+    // Check if the extension is available
+    if (!m_vkd->vkSetHdrMetadataEXT) {
+      Logger::warn("Presenter: vkSetHdrMetadataEXT not available, HDR metadata not set");
+      return;
+    }
+
+    VkHdrMetadataEXT hdrMetadata = {};
+    hdrMetadata.sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT;
+    hdrMetadata.pNext = nullptr;
+
+    // Only provide static HDR metadata for PQ/HDR10 (ST2084). For HLG and linear/scRGB leave defaults.
+    if (hdrFormat == 1) {
+      // ST2086: primaries (BT.2020) and D65 white
+      hdrMetadata.displayPrimaryRed.x   = 0.708f;
+      hdrMetadata.displayPrimaryRed.y   = 0.292f;
+      hdrMetadata.displayPrimaryGreen.x = 0.170f;
+      hdrMetadata.displayPrimaryGreen.y = 0.797f;
+      hdrMetadata.displayPrimaryBlue.x  = 0.131f;
+      hdrMetadata.displayPrimaryBlue.y  = 0.046f;
+      hdrMetadata.whitePoint.x          = 0.3127f;
+      hdrMetadata.whitePoint.y          = 0.3290f;
+
+      hdrMetadata.maxLuminance = maxLuminance;    // display peak (nits)
+      hdrMetadata.minLuminance = minLuminance;    // display black level (nits)
+
+      // If content CLL/FALL not measured, set to 0 to indicate unknown
+      hdrMetadata.maxContentLightLevel        = 0;
+      hdrMetadata.maxFrameAverageLightLevel   = 0;
+    }
+
+    // Set the HDR metadata for our swapchain
+    // Note: vkSetHdrMetadataEXT returns void, not VkResult
+    m_vkd->vkSetHdrMetadataEXT(
+      m_vkd->device(),
+      1,                    // swapchainCount
+      &m_swapchain,        // pSwapchains
+      &hdrMetadata         // pMetadata
+    );
+
+    Logger::debug(str::format(
+      "Presenter: HDR metadata set"
+      " | format=", (hdrFormat == 1 ? "PQ" : hdrFormat == 2 ? "HLG" : "Linear"),
+      " | max=", maxLuminance,
+      " | min=", minLuminance,
+      " | paperWhite=", paperWhiteLuminance));
+    #else
+    Logger::warn("Presenter: VK_EXT_hdr_metadata not supported at compile time");
+    #endif
+  }
+
   // NV-DXVK start: App Controlled FSE
   VkResult Presenter::acquireFullscreenExclusive() {
     if (!m_info.appOwnedFSE)

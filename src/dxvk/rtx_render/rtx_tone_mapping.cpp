@@ -31,8 +31,12 @@
 #include <rtx_shaders/tonemapping_histogram.h>
 #include <rtx_shaders/tonemapping_tone_curve.h>
 #include <rtx_shaders/tonemapping_apply_tonemapping.h>
+#include <rtx_shaders/hdr_processing.h>
 #include "rtx_imgui.h"
 #include "rtx/utility/debug_view_indices.h"
+#include <algorithm>
+#include <cmath>
+#include <vector>
 
 static_assert((TONEMAPPING_TONE_CURVE_SAMPLE_COUNT & 1) == 0, "The shader expects a sample count that is a multiple of 2.");
 
@@ -85,6 +89,22 @@ namespace dxvk {
 
     PREWARM_SHADER_PIPELINE(ApplyTonemappingShader);
   }
+
+    class HDRProcessingShader : public ManagedShader
+    {
+      SHADER_SOURCE(HDRProcessingShader, VK_SHADER_STAGE_COMPUTE_BIT, hdr_processing)
+
+      PUSH_CONSTANTS(HDRProcessingArgs)
+
+      BEGIN_PARAMETER()
+        TEXTURE2DARRAY(HDR_PROCESSING_BLUE_NOISE_TEXTURE)
+        RW_TEXTURE2D(HDR_PROCESSING_INPUT_BUFFER)
+        RW_TEXTURE2D(HDR_PROCESSING_OUTPUT_BUFFER)
+        RW_TEXTURE1D_READONLY(HDR_PROCESSING_EXPOSURE_INPUT)
+      END_PARAMETER()
+    };
+
+    PREWARM_SHADER_PIPELINE(HDRProcessingShader);
   
   DxvkToneMapping::DxvkToneMapping(DxvkDevice* device)
   : CommonDeviceObject(device), m_vkd(device->vkd())  {
@@ -96,6 +116,8 @@ namespace dxvk {
 
     ImGui::DragFloat("Global Exposure", &exposureBiasObject(), 0.01f, -4.f, 4.f);
     
+    ImGui::Separator();
+    
     ImGui::Checkbox("Color Grading Enabled", &colorGradingEnabledObject());
     if (colorGradingEnabled()) {
       ImGui::Indent();
@@ -105,9 +127,51 @@ namespace dxvk {
       ImGui::Separator();
       ImGui::Unindent();
     }
+    
+    // Curve Editor Section
+    ImGui::Separator();
+    ImGui::Text("Curve Editor");
+    ImGui::Checkbox("Enable Curve Editor", &enableCurveEditorObject());
+    
+    if (enableCurveEditor()) {
+      ImGui::Indent();
+      ImGui::Checkbox("Use Custom Curve", &useCustomCurveObject());
+      
+      // Initialize curve points if not done
+      if (!m_curveEditorInitialized) {
+        m_customCurvePoints.clear();
+        m_customCurvePoints.emplace_back(0.0f, 0.0f);   // Black point
+        m_customCurvePoints.emplace_back(1.0f, 1.0f);   // White point
+        m_curveEditorInitialized = true;
+      }
+      
+      // Show curve editor widget
+      if (showCurveEditor("Tone Curve", m_customCurvePoints, ImVec2(300, 300))) {
+        // Curve was modified, mark as changed
+        m_isCurveChanged = true;
+      }
+      
+      ImGui::Text("Instructions:");
+      ImGui::BulletText("Left click to add control points");
+      ImGui::BulletText("Right click to remove control points");
+      ImGui::BulletText("Drag points to adjust curve");
+      ImGui::BulletText("X-axis: Input (shadows to highlights)");
+      ImGui::BulletText("Y-axis: Output (dark to bright)");
+      
+      if (ImGui::Button("Reset Curve")) {
+        m_customCurvePoints.clear();
+        m_customCurvePoints.emplace_back(0.0f, 0.0f);
+        m_customCurvePoints.emplace_back(1.0f, 1.0f);
+        m_isCurveChanged = true;
+      }
+      
+      ImGui::Unindent();
+    }
+
+    ImGui::Separator();
 
     ImGui::Checkbox("Tonemapping Enabled", &tonemappingEnabledObject());
-    if (tonemappingEnabled()) {
+    if (tonemappingEnabled()) {  // Show tonemapping options when enabled
       ImGui::Indent();
       
       // Tone mapping operator selection
@@ -335,6 +399,47 @@ namespace dxvk {
 
   }
 
+  void DxvkToneMapping::dispatchHDRProcessing(
+    Rc<RtxContext> ctx,
+    Rc<DxvkSampler> linearSampler,
+    Rc<DxvkImageView> exposureView,
+    const Resources::Resource& inputColorBuffer,
+    const Resources::Resource& outputColorBuffer,
+    const float frameTimeMilliseconds,
+    bool autoExposureEnabled) {
+
+    ScopedGpuProfileZone(ctx, "HDR Processing");
+
+    const VkExtent3D workgroups = util::computeBlockCount(inputColorBuffer.view->imageInfo().extent, VkExtent3D{ 16 , 16, 1 });
+
+    // Prepare shader arguments
+    HDRProcessingArgs pushArgs = {};
+    pushArgs.enableAutoExposure = autoExposureEnabled;
+    pushArgs.hdrMaxLuminance = hdrMaxLuminance();
+    pushArgs.hdrMinLuminance = hdrMinLuminance();
+    pushArgs.hdrPaperWhiteLuminance = hdrPaperWhiteLuminance();
+    pushArgs.exposureFactor = 1.0f; // Neutral exposure factor, rely on hdrExposureBias instead
+    pushArgs.frameIndex = ctx->getDevice()->getCurrentFrameId();
+    pushArgs.hdrFormat = static_cast<uint32_t>(hdrFormat()); // 0=Linear, 1=PQ, 2=HLG
+    pushArgs.hdrExposureBias = hdrExposureBias();
+    pushArgs.hdrBrightness = hdrBrightness();
+    pushArgs.hdrToneMapper = static_cast<uint32_t>(hdrToneMapper());
+    pushArgs.hdrEnableDithering = hdrEnableDithering();
+    pushArgs.hdrShadows = hdrShadows();
+    pushArgs.hdrMidtones = hdrMidtones();
+    pushArgs.hdrHighlights = hdrHighlights();
+    pushArgs.hdrBlueNoiseAmplitude = hdrBlueNoiseAmplitude();
+
+    ctx->bindResourceView(HDR_PROCESSING_BLUE_NOISE_TEXTURE, ctx->getResourceManager().getBlueNoiseTexture(ctx), nullptr);
+    ctx->bindResourceView(HDR_PROCESSING_INPUT_BUFFER, inputColorBuffer.view, nullptr);
+    ctx->bindResourceView(HDR_PROCESSING_OUTPUT_BUFFER, outputColorBuffer.view, nullptr);
+    ctx->bindResourceView(HDR_PROCESSING_EXPOSURE_INPUT, exposureView, nullptr);
+    ctx->bindResourceSampler(HDR_PROCESSING_EXPOSURE_INPUT, linearSampler);
+    ctx->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, HDRProcessingShader::getShader());
+    ctx->pushConstants(0, sizeof(pushArgs), &pushArgs);
+    ctx->dispatch(workgroups.width, workgroups.height, workgroups.depth);
+  }
+
   void DxvkToneMapping::dispatch(
     Rc<RtxContext> ctx,
     Rc<DxvkSampler> linearSampler,
@@ -358,13 +463,251 @@ namespace dxvk {
     }
 
     const Resources::Resource& inputColorBuffer = rtOutput.m_finalOutput.resource(Resources::AccessType::Read);
-    if (tonemappingEnabled()) {
-      dispatchHistogram(ctx, exposureView, inputColorBuffer, autoExposureEnabled);
-      dispatchToneCurve(ctx);
-    }
+    
+    if (enableHDR()) {
+      // HDR mode: Apply custom HDR processing with blue noise dithering
+      dispatchHDRProcessing(ctx, linearSampler, exposureView, inputColorBuffer, rtOutput.m_finalOutput.resource(Resources::AccessType::Write), frameTimeMilliseconds, autoExposureEnabled);
+    } else {
+      // SDR mode: Apply traditional tonemapping
+      if (tonemappingEnabled()) {
+        dispatchHistogram(ctx, exposureView, inputColorBuffer, autoExposureEnabled);
+        dispatchToneCurve(ctx);
+      }
 
-    dispatchApplyToneMapping(ctx, linearSampler, exposureView, inputColorBuffer, rtOutput.m_finalOutput.resource(Resources::AccessType::Write), performSRGBConversion, autoExposureEnabled);
+      dispatchApplyToneMapping(ctx, linearSampler, exposureView, inputColorBuffer, rtOutput.m_finalOutput.resource(Resources::AccessType::Write), performSRGBConversion, autoExposureEnabled);
+    }
 
     m_resetState = false;
   }
+
+  // Curve editor widget implementation
+  bool DxvkToneMapping::showCurveEditor(const char* label, std::vector<CurvePoint>& points, ImVec2 size) {
+    bool modified = false;
+    
+    ImGui::PushID(label);
+    
+    // Get the current draw list and canvas position
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+    
+    // Create invisible button for interaction
+    ImGui::InvisibleButton("curve_canvas", size);
+    
+    // Calculate drawing area
+    ImVec2 canvas_min = canvas_pos;
+    ImVec2 canvas_max = ImVec2(canvas_pos.x + size.x, canvas_pos.y + size.y);
+    
+    // Add a border
+    draw_list->AddRect(canvas_min, canvas_max, IM_COL32(255, 255, 255, 128));
+    
+    // Draw grid (like Photoshop)
+    const int grid_lines = 4;
+    for (int i = 1; i < grid_lines; ++i) {
+      float t = (float)i / grid_lines;
+      
+      // Vertical grid lines
+      float x = canvas_min.x + t * size.x;
+      draw_list->AddLine(ImVec2(x, canvas_min.y), ImVec2(x, canvas_max.y), IM_COL32(128, 128, 128, 64));
+      
+      // Horizontal grid lines
+      float y = canvas_min.y + t * size.y;
+      draw_list->AddLine(ImVec2(canvas_min.x, y), ImVec2(canvas_max.x, y), IM_COL32(128, 128, 128, 64));
+    }
+    
+    // Sort points by x coordinate
+    std::sort(points.begin(), points.end(), [](const CurvePoint& a, const CurvePoint& b) {
+      return a.x < b.x;
+    });
+    
+    // Draw the curve using bezier segments
+    if (points.size() >= 2) {
+      const int curve_segments = 100;
+      
+      for (int i = 0; i < curve_segments; ++i) {
+        float t1 = (float)i / curve_segments;
+        float t2 = (float)(i + 1) / curve_segments;
+        
+        float y1 = evaluateCurve(points, t1);
+        float y2 = evaluateCurve(points, t2);
+        
+        // Convert to screen coordinates
+        ImVec2 p1 = ImVec2(canvas_min.x + t1 * size.x, canvas_max.y - y1 * size.y);
+        ImVec2 p2 = ImVec2(canvas_min.x + t2 * size.x, canvas_max.y - y2 * size.y);
+        
+        draw_list->AddLine(p1, p2, IM_COL32(255, 255, 255, 255), 2.0f);
+      }
+    }
+    
+    // Handle mouse interactions
+    ImVec2 mouse_pos = ImGui::GetMousePos();
+    bool mouse_in_canvas = mouse_pos.x >= canvas_min.x && mouse_pos.x <= canvas_max.x &&
+                          mouse_pos.y >= canvas_min.y && mouse_pos.y <= canvas_max.y;
+    
+    if (mouse_in_canvas) {
+      // Convert mouse position to normalized coordinates
+      float norm_x = (mouse_pos.x - canvas_min.x) / size.x;
+      float norm_y = 1.0f - (mouse_pos.y - canvas_min.y) / size.y; // Flip Y axis
+      
+      // Clamp to valid range
+      norm_x = std::max(0.0f, std::min(1.0f, norm_x));
+      norm_y = std::max(0.0f, std::min(1.0f, norm_y));
+      
+      // Left click to add or drag points
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        // Find closest point within threshold
+        int closest_point = -1;
+        float min_dist = 0.05f; // Threshold for selection
+        
+        for (int i = 0; i < points.size(); ++i) {
+          float dist = std::sqrt(std::pow(points[i].x - norm_x, 2) + std::pow(points[i].y - norm_y, 2));
+          if (dist < min_dist) {
+            min_dist = dist;
+            closest_point = i;
+          }
+        }
+        
+        if (closest_point == -1) {
+          // Add new point (but not on the endpoints)
+          if (norm_x > 0.05f && norm_x < 0.95f) {
+            points.emplace_back(norm_x, norm_y);
+            modified = true;
+          }
+        }
+      }
+      
+      // Right click to remove points
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+        for (int i = 1; i < points.size() - 1; ++i) { // Don't remove endpoints
+          float dist = std::sqrt(std::pow(points[i].x - norm_x, 2) + std::pow(points[i].y - norm_y, 2));
+          if (dist < 0.05f) {
+            points.erase(points.begin() + i);
+            modified = true;
+            break;
+          }
+        }
+      }
+    }
+    
+    // Handle dragging
+    static int dragging_point = -1;
+    if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && mouse_in_canvas) {
+      if (dragging_point == -1) {
+        // Find point to drag
+        float norm_x = (mouse_pos.x - canvas_min.x) / size.x;
+        float norm_y = 1.0f - (mouse_pos.y - canvas_min.y) / size.y;
+        
+        for (int i = 0; i < points.size(); ++i) {
+          float dist = std::sqrt(std::pow(points[i].x - norm_x, 2) + std::pow(points[i].y - norm_y, 2));
+          if (dist < 0.05f) {
+            dragging_point = i;
+            break;
+          }
+        }
+      }
+      
+      if (dragging_point != -1) {
+        float norm_x = (mouse_pos.x - canvas_min.x) / size.x;
+        float norm_y = 1.0f - (mouse_pos.y - canvas_min.y) / size.y;
+        
+        // Clamp to valid range
+        norm_x = std::max(0.0f, std::min(1.0f, norm_x));
+        norm_y = std::max(0.0f, std::min(1.0f, norm_y));
+        
+        // Don't allow moving endpoints horizontally
+        if (dragging_point == 0 || dragging_point == points.size() - 1) {
+          points[dragging_point].y = norm_y;
+        } else {
+          points[dragging_point].x = norm_x;
+          points[dragging_point].y = norm_y;
+        }
+        
+        modified = true;
+      }
+    }
+    
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+      dragging_point = -1;
+    }
+    
+    // Draw control points
+    for (int i = 0; i < points.size(); ++i) {
+      ImVec2 screen_pos = ImVec2(canvas_min.x + points[i].x * size.x, canvas_max.y - points[i].y * size.y);
+      
+      // Different colors for different types of points
+      ImU32 color = IM_COL32(255, 255, 255, 255);
+      if (i == 0 || i == points.size() - 1) {
+        color = IM_COL32(255, 0, 0, 255); // Red for endpoints
+      }
+      
+      draw_list->AddCircleFilled(screen_pos, 4.0f, color);
+      draw_list->AddCircle(screen_pos, 4.0f, IM_COL32(0, 0, 0, 255), 0, 1.0f);
+    }
+    
+    // Show curve value at mouse position
+    if (mouse_in_canvas) {
+      float norm_x = (mouse_pos.x - canvas_min.x) / size.x;
+      float curve_y = evaluateCurve(points, norm_x);
+      
+      ImGui::SetTooltip("Input: %.3f, Output: %.3f", norm_x, curve_y);
+    }
+    
+    ImGui::PopID();
+    
+    return modified;
+  }
+
+  // Evaluate curve at given x position using smooth interpolation
+  float DxvkToneMapping::evaluateCurve(const std::vector<CurvePoint>& points, float x) {
+    if (points.empty()) return x; // Linear fallback
+    
+    x = std::max(0.0f, std::min(1.0f, x));
+    
+    // Find the two points that bracket x
+    int left = 0, right = points.size() - 1;
+    
+    for (int i = 0; i < points.size() - 1; ++i) {
+      if (x >= points[i].x && x <= points[i + 1].x) {
+        left = i;
+        right = i + 1;
+        break;
+      }
+    }
+    
+    // Linear interpolation between the two points
+    if (left == right) {
+      return points[left].y;
+    }
+    
+    float t = (x - points[left].x) / (points[right].x - points[left].x);
+    
+    // Smooth interpolation (cubic hermite spline)
+    float p0 = points[left].y;
+    float p1 = points[right].y;
+    
+    // Calculate tangents for smooth curve
+    float m0 = 0.0f, m1 = 0.0f;
+    
+    if (left > 0) {
+      m0 = (points[right].y - points[left - 1].y) / (points[right].x - points[left - 1].x);
+    }
+    if (right < points.size() - 1) {
+      m1 = (points[right + 1].y - points[left].y) / (points[right + 1].x - points[left].x);
+    }
+    
+    // Apply smoothing factor
+    m0 *= 0.5f;
+    m1 *= 0.5f;
+    
+    // Hermite interpolation
+    float t2 = t * t;
+    float t3 = t2 * t;
+    
+    float h00 = 2.0f * t3 - 3.0f * t2 + 1.0f;
+    float h10 = t3 - 2.0f * t2 + t;
+    float h01 = -2.0f * t3 + 3.0f * t2;
+    float h11 = t3 - t2;
+    
+    return h00 * p0 + h10 * m0 * (points[right].x - points[left].x) + h01 * p1 + h11 * m1 * (points[right].x - points[left].x);
+  }
+
 }

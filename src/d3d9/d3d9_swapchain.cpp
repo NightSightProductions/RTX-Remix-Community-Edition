@@ -31,6 +31,7 @@
 #include "../util/util_string.h"
 #include "../dxvk/rtx_render/rtx_bridge_message_channel.h"
 #include "../dxvk/dxvk_scoped_annotation.h"
+#include "../dxvk/rtx_render/rtx_context.h"
 
 // NV-DXVK start: DLFG integration
 #include "../dxvk/rtx_render/rtx_dlfg.h"
@@ -504,6 +505,28 @@ namespace dxvk {
     // NV-DXVK end
     recreate   |= window != m_window;    
     recreate   |= m_dialog != m_lastDialog;
+    
+    // NV-DXVK start: HDR setting change detection
+    // Check if HDR setting or format has changed since last frame (per-swapchain tracking)
+    bool currentHDRState = false;
+    uint32_t currentHDRFormat = 0;
+    try {
+      auto common = m_device->getCommon();
+      currentHDRState = common->metaToneMapping().enableHDR();
+      currentHDRFormat = static_cast<uint32_t>(common->metaToneMapping().hdrFormat());
+    } catch (...) {
+      currentHDRState = false;
+      currentHDRFormat = 0;
+    }
+
+    if (m_hdrStateInitialized && (currentHDRState != m_prevHdrEnabled || currentHDRFormat != m_prevHdrFormat)) {
+      recreate = true;
+    }
+
+    m_prevHdrEnabled = currentHDRState;
+    m_prevHdrFormat = currentHDRFormat;
+    m_hdrStateInitialized = true;
+    // NV-DXVK end
 
     // NV-DXVK start: Support games changing the HWND at runtime.
     if (window != m_window) {
@@ -530,8 +553,29 @@ namespace dxvk {
       if (recreate)
         CreatePresenter();
 
+      // Recreate swapchain if needed
       if (std::exchange(m_dirty, false))
         RecreateSwapChain(vsync);
+
+      // If HDR is enabled and only HDR metadata values changed, update metadata without forcing recreate
+      try {
+        auto common = m_device->getCommon();
+        if (common->metaToneMapping().enableHDR() && GetPresenter()->hasSwapChain()) {
+          const float curMax = common->metaToneMapping().hdrMaxLuminance();
+          const float curMin = common->metaToneMapping().hdrMinLuminance();
+          const float curPaper = common->metaToneMapping().hdrPaperWhiteLuminance();
+          const uint32_t curFormat = static_cast<uint32_t>(common->metaToneMapping().hdrFormat());
+          if (m_prevHdrEnabled && curFormat == m_prevHdrFormat && (
+                curMax != m_prevHdrMaxLuminance || curMin != m_prevHdrMinLuminance || curPaper != m_prevHdrPaperWhiteLuminance)) {
+            GetPresenter()->setHdrMetadata(true, curFormat, curMax, curMin, curPaper);
+            m_prevHdrMaxLuminance = curMax;
+            m_prevHdrMinLuminance = curMin;
+            m_prevHdrPaperWhiteLuminance = curPaper;
+          }
+        }
+      } catch (...) {
+        // ignore
+      }
 
       // We aren't going to device loss simply because
       // 99% of D3D9 games don't handle this properly and
@@ -1344,6 +1388,25 @@ namespace dxvk {
       throw DxvkError("D3D9SwapChainEx: Failed to recreate swap chain");
     // NV-DXVK end
     
+    // Set HDR metadata if HDR is enabled
+    try {
+      auto common = m_device->getCommon();
+      bool hdrEnabled = common->metaToneMapping().enableHDR();
+      if (hdrEnabled) {
+        uint32_t hdrFormat = static_cast<uint32_t>(common->metaToneMapping().hdrFormat());
+        float maxLuminance = common->metaToneMapping().hdrMaxLuminance();
+        float minLuminance = common->metaToneMapping().hdrMinLuminance();
+        float paperWhiteLuminance = common->metaToneMapping().hdrPaperWhiteLuminance();
+
+        m_prevHdrMaxLuminance = maxLuminance;
+        m_prevHdrMinLuminance = minLuminance;
+        m_prevHdrPaperWhiteLuminance = paperWhiteLuminance;
+
+        GetPresenter()->setHdrMetadata(hdrEnabled, hdrFormat, maxLuminance, minLuminance, paperWhiteLuminance);
+      }
+    } catch (...) {
+      Logger::warn("D3D9SwapChain: Failed to set HDR metadata");
+    }
 
     CreateRenderTargetViews();
   }
@@ -1587,34 +1650,118 @@ namespace dxvk {
           VkSurfaceFormatKHR*       pDstFormats) {
     uint32_t n = 0;
 
-    switch (Format) {
-      default:
-        Logger::warn(str::format("D3D9SwapChainEx: Unexpected format: ", Format));
-        
-      case D3D9Format::A8R8G8B8:
-      case D3D9Format::X8R8G8B8:
-      case D3D9Format::A8B8G8R8:
-      case D3D9Format::X8B8G8R8: {
-        pDstFormats[n++] = { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
-        pDstFormats[n++] = { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
-      } break;
+    // Check if HDR is enabled in RTX context and get format
+    bool hdrEnabled = false;
+    uint32_t hdrFormat = 0; // 0=Linear, 1=PQ, 2=HLG
+    try {
+      // Access HDR setting through the device's common objects
+      auto common = m_device->getCommon();
+      hdrEnabled = common->metaToneMapping().enableHDR();
+      hdrFormat = static_cast<uint32_t>(common->metaToneMapping().hdrFormat());
+    } catch (...) {
+      // Fallback if cast fails
+      hdrEnabled = false;
+      hdrFormat = 0;
+    }
 
-      case D3D9Format::A2R10G10B10:
-      case D3D9Format::A2B10G10R10: {
-        pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
-        pDstFormats[n++] = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
-      } break;
+    // If HDR is enabled, prioritize HDR formats and color spaces
+    if (hdrEnabled) {
+      Logger::info(str::format("D3D9SwapChain: HDR enabled with format ", hdrFormat, " (0=Linear, 1=PQ, 2=HLG)"));
+      
+      switch (Format) {
+        default:
+        case D3D9Format::A8R8G8B8:
+        case D3D9Format::X8R8G8B8:
+        case D3D9Format::A8B8G8R8:
+        case D3D9Format::X8B8G8R8: {
+          // Select color space based on HDR format
+          if (hdrFormat == 1) {
+            // PQ/HDR10 format - use HDR10 color space (BT.2020 + ST2084)
+            // Prioritize 16-bit float for better PQ precision, then 10-bit UNORM
+            pDstFormats[n++] = { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_ST2084_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT };
+          } else if (hdrFormat == 2) {
+            // HLG format - prefer HDR10 HLG color space (BT.2020 + HLG)
+            pDstFormats[n++] = { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_HLG_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_HLG_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_HLG_EXT };
+          } else {
+            // Linear format (0) - use extended linear sRGB (scRGB / BT.709)
+            pDstFormats[n++] = { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT };
+          }
+          // Fallback to SDR formats if HDR not supported
+          pDstFormats[n++] = { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        } break;
 
-      case D3D9Format::X1R5G5B5:
-      case D3D9Format::A1R5G5B5: {
-        pDstFormats[n++] = { VK_FORMAT_B5G5R5A1_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
-        pDstFormats[n++] = { VK_FORMAT_R5G5B5A1_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
-        pDstFormats[n++] = { VK_FORMAT_A1R5G5B5_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        case D3D9Format::A2R10G10B10:
+        case D3D9Format::A2B10G10R10: {
+          // Select color space based on HDR format for 10-bit formats
+          if (hdrFormat == 1) {
+            // PQ/HDR10 - prefer 16-bit float for better precision
+            pDstFormats[n++] = { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_ST2084_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT };
+          } else if (hdrFormat == 2) {
+            // HLG
+            pDstFormats[n++] = { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_HLG_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_HLG_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_HLG_EXT };
+          } else {
+            // Linear
+            pDstFormats[n++] = { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT };
+            pDstFormats[n++] = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT };
+          }
+          pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        } break;
+
+        case D3D9Format::X1R5G5B5:
+        case D3D9Format::A1R5G5B5:
+        case D3D9Format::R5G6B5: {
+          // Upgrade low bit depth to HDR formats
+          pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT };
+          pDstFormats[n++] = { VK_FORMAT_B5G5R5A1_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_R5G5B5A1_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_A1R5G5B5_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_B5G6R5_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_R5G6B5_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        } break;
       }
+    } else {
+      // Traditional SDR format selection
+      switch (Format) {
+        default:
+          Logger::warn(str::format("D3D9SwapChainEx: Unexpected format: ", Format));
+          
+        case D3D9Format::A8R8G8B8:
+        case D3D9Format::X8R8G8B8:
+        case D3D9Format::A8B8G8R8:
+        case D3D9Format::X8B8G8R8: {
+          pDstFormats[n++] = { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        } break;
 
-      case D3D9Format::R5G6B5: {
-        pDstFormats[n++] = { VK_FORMAT_B5G6R5_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
-        pDstFormats[n++] = { VK_FORMAT_R5G6B5_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        case D3D9Format::A2R10G10B10:
+        case D3D9Format::A2B10G10R10: {
+          pDstFormats[n++] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        } break;
+
+        case D3D9Format::X1R5G5B5:
+        case D3D9Format::A1R5G5B5: {
+          pDstFormats[n++] = { VK_FORMAT_B5G5R5A1_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_R5G5B5A1_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_A1R5G5B5_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        }
+
+        case D3D9Format::R5G6B5: {
+          pDstFormats[n++] = { VK_FORMAT_B5G6R5_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+          pDstFormats[n++] = { VK_FORMAT_R5G6B5_UNORM_PACK16, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        }
       }
     }
 

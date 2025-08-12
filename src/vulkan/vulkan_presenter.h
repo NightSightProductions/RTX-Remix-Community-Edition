@@ -279,6 +279,24 @@ namespace dxvk::vk {
      */
     VkResult releaseFullscreenExclusive();
 
+    /**
+     * \brief Sets HDR metadata for the swapchain
+     *
+     * Sets HDR metadata (ST2086) for proper HDR display configuration.
+     * This should be called after swapchain creation when HDR is enabled.
+     * \param [in] hdrEnabled Whether HDR is enabled
+     * \param [in] hdrFormat HDR format (0=Linear, 1=PQ, 2=HLG)
+     * \param [in] maxLuminance Maximum display luminance in nits
+     * \param [in] minLuminance Minimum display luminance in nits
+     * \param [in] paperWhiteLuminance Paper white luminance in nits
+     */
+    void setHdrMetadata(
+            bool      hdrEnabled,
+            uint32_t  hdrFormat,
+            float     maxLuminance,
+            float     minLuminance,
+            float     paperWhiteLuminance);
+
     // NV-DXVK start: Global window handle accessor
     HWND getWindowHandle() const {
       return m_window;

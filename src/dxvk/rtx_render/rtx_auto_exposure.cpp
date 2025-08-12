@@ -98,11 +98,35 @@ namespace dxvk {
     ImGui::Checkbox("Eye Adaptation", &enabledObject());
     if (enabled()) {
       ImGui::Indent();
+      
+      // Check if HDR is enabled to show HDR-specific settings
+      auto& toneMapping = device()->getCommon()->metaToneMapping();
+      bool isHDREnabled = toneMapping.enableHDR();
+      
+      if (isHDREnabled) {
+        ImGui::Text("HDR Auto Exposure Settings");
+        ImGui::Checkbox("Use HDR-Specific Settings", &useHDRSpecificSettingsObject());
+        
+        if (useHDRSpecificSettings()) {
+          ImGui::Indent();
+          ImGui::DragFloat("HDR Adaptation Speed", &hdrAutoExposureSpeedObject(), 0.01f, 0.1f, 20.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("HDR Min (EV100)", &hdrEvMinValueObject(), 0.1f, -6.0f, 0.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("HDR Max (EV100)", &hdrEvMaxValueObject(), 0.1f, 3.0f, 12.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::Unindent();
+          ImGui::Separator();
+        } else {
+          ImGui::Text("Using standard SDR settings with expanded range for HDR");
+          ImGui::Separator();
+        }
+      }
+      
       ImGui::Combo("Average Mode", &exposureAverageModeObject(), "Mean\0Median");
 
-      ImGui::DragFloat("Adaptation Speed", &autoExposureSpeedObject(), 0.001f, 0.f, 100.f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::DragFloat("Min (EV100)", &evMinValueObject(), 0.01f, -24.f, 24.f);
-      ImGui::DragFloat("Max (EV100)", &evMaxValueObject(), 0.01f, -24.f, 24.f);
+      if (!isHDREnabled || !useHDRSpecificSettings()) {
+        ImGui::DragFloat("Adaptation Speed", &autoExposureSpeedObject(), 0.001f, 0.f, 100.f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::DragFloat("Min (EV100)", &evMinValueObject(), 0.01f, -24.f, 24.f);
+        ImGui::DragFloat("Max (EV100)", &evMaxValueObject(), 0.01f, -24.f, 24.f);
+      }
 
       ImGui::Checkbox("Center Weighted Metering", &exposureCenterMeteringEnabledObject());
       ImGui::BeginDisabled(!exposureCenterMeteringEnabled());
@@ -275,18 +299,45 @@ namespace dxvk {
       {
         ScopedGpuProfileZone(ctx, "Histogram");
         static_cast<RtxContext*>(ctx.ptr())->setFramePassStage(RtxFramePassStage::AutoExposure_Histogram);
+        
+        // Check if HDR is enabled from the tone mapping settings
+        auto& toneMapping = ctx->getCommonObjects()->metaToneMapping();
+        bool isHDREnabled = toneMapping.enableHDR();
+        
+        // Note: Auto exposure runs BEFORE tone mapping and reads from the composite buffer
+        // which contains relative [0,1] HDR values. These values work directly with EV 
+        // calculations without additional scaling. HDR support is achieved through 
+        // expanded EV ranges rather than luminance scaling.
+        
         // Prepare shader arguments
         ToneMappingAutoExposureArgs pushArgs = {};
         pushArgs.numPixels = rtOutput.m_finalOutputExtent.width * rtOutput.m_finalOutputExtent.height;
-        // Note: Autoexposure speed is in units per second, so convert from milliseconds to seconds here.
-        pushArgs.autoExposureSpeed = autoExposureSpeed() * (0.001f * frameTimeMilliseconds);
-        pushArgs.evMinValue = evMinValue();
-        pushArgs.evRange = evMaxValue() - evMinValue();
+        
+        // Use HDR-specific settings if HDR is enabled and HDR-specific settings are enabled
+        if (isHDREnabled && useHDRSpecificSettings()) {
+          // Note: HDR autoexposure speed is in units per second, so convert from milliseconds to seconds here.
+          pushArgs.autoExposureSpeed = hdrAutoExposureSpeed() * (0.001f * frameTimeMilliseconds);
+          pushArgs.evMinValue = hdrEvMinValue();
+          pushArgs.evRange = hdrEvMaxValue() - hdrEvMinValue();
+        } else if (isHDREnabled) {
+          // HDR is enabled but using standard settings - expand range automatically
+          pushArgs.autoExposureSpeed = autoExposureSpeed() * (0.001f * frameTimeMilliseconds);
+          pushArgs.evMinValue = std::min(evMinValue(), -2.0f); // Allow darker shadows (was -4.0f)
+          float hdrEvMax = std::max(evMaxValue(), 8.0f); // Allow brighter highlights (was 10.0f)
+          pushArgs.evRange = hdrEvMax - pushArgs.evMinValue;
+        } else {
+          // Standard SDR settings
+          pushArgs.autoExposureSpeed = autoExposureSpeed() * (0.001f * frameTimeMilliseconds);
+          pushArgs.evMinValue = evMinValue();
+          pushArgs.evRange = evMaxValue() - evMinValue();
+        }
+        
         pushArgs.debugMode = (ctx->getCommonObjects()->metaDebugView().debugViewIdx() == DEBUG_VIEW_EXPOSURE_HISTOGRAM);
         pushArgs.enableCenterMetering = exposureCenterMeteringEnabled();
         pushArgs.centerMeteringSize = centerMeteringSize();
         pushArgs.averageMode = (uint32_t)exposureAverageMode();
         pushArgs.useExposureCompensation = useExposureCompensation();
+        
         ctx->pushConstants(0, sizeof(pushArgs), &pushArgs);
 
         // Calculate histogram
