@@ -150,6 +150,7 @@ namespace dxvk {
     Rc<DxvkImageView> imageView = VK_NULL_HANDLE;
     VkDescriptorSet texID = VK_NULL_HANDLE;
     uint32_t textureFeatureFlags = 0;
+    uint64_t lastUsedFrame = 0;
   };
   std::unordered_map<XXH64_hash_t, ImGuiTexture> g_imguiTextureMap;
   fast_unordered_cache<FogState> g_imguiFogMap;
@@ -636,7 +637,7 @@ namespace dxvk {
     VkDescriptorPoolSize pool_sizes[] =
     {
       { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
-      { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+      { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 50000 },
       { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
       { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
       { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
@@ -654,7 +655,7 @@ namespace dxvk {
     // ImGUI is currently using a single set per texture, and so we want this to be a big number 
     //  to support displaying texture lists in games that use a lot of textures.
     // See: 'ImGui_ImplVulkan_AddTexture(...)' for more details about how this system works.
-    pool_info.maxSets = 10000;
+    pool_info.maxSets = 50000;
     pool_info.poolSizeCount = std::size(pool_sizes);
     pool_info.pPoolSizes = pool_sizes;
 
@@ -2519,135 +2520,164 @@ namespace dxvk {
     auto foundTextureHash = std::optional<XXH64_hash_t> {};
     auto highlightColor = HighlightColor::World;
 
-    for (auto& [texHash, texImgui] : g_imguiTextureMap) {
+    bool descriptorAllocationFailed = false;
+
+    // Build a deterministic list of candidate textures
+    std::vector<XXH64_hash_t> orderedTextures;
+    orderedTextures.reserve(g_imguiTextureMap.size());
+    for (const auto& kv : g_imguiTextureMap) orderedTextures.push_back(kv.first);
+    std::sort(orderedTextures.begin(), orderedTextures.end());
+
+    // Pre-filter according to UI options to enable row clipping
+    std::vector<XXH64_hash_t> filtered;
+    filtered.reserve(orderedTextures.size());
+    for (const auto texHash : orderedTextures) {
+      const auto it = g_imguiTextureMap.find(texHash);
+      if (it == g_imguiTextureMap.end()) continue;
+      const auto& texImgui = it->second;
+
       bool textureHasSelection = false;
-
       if (isListFiltered) {
-        const auto& textureSet = listRtxOption.textureSetOption->get();
         textureHasSelection = listRtxOption.textureSetOption->containsHash(texHash);
-
         if ((listRtxOption.featureFlagMask & texImgui.textureFeatureFlags) != listRtxOption.featureFlagMask) {
-          // If the list needs to be filtered by texture feature, skip it for this category.
           continue;
         }
       } else {
         for (const auto rtxOption : rtxTextureOptions) {
           textureHasSelection = rtxOption.textureSetOption->containsHash(texHash);
-          if (textureHasSelection) {
-            break;
-          }
+          if (textureHasSelection) break;
         }
       }
 
       if (legacyTextureGuiShowAssignedOnly()) {
         if (std::string_view { uniqueId } == Uncategorized) {
-          if (textureHasSelection) {
-            continue; // Currently handling the uncategorized texture tab and current texture is assigned to a category -> skip
-          }
+          if (textureHasSelection) continue;
         } else {
-          if (!textureHasSelection) {
-            continue; // Texture is not assigned to this category -> skip
-          }
+          if (!textureHasSelection) continue;
         }
       }
 
-      if (texHash == textureInPopup || texHash == g_jumpto.load()) {
-        const auto blueColor = ImGui::GetStyleColorVec4(ImGuiCol_Button);
-        const auto nvidiaColor = ImVec4(0.462745f, 0.725490f, 0.f, 1.f);
+      filtered.push_back(texHash);
+    }
 
-        const auto color = (texHash == textureInPopup ? blueColor : nvidiaColor);
-        const float anim = animatedHighlightIntensity(GlobalTime::get().absoluteTimeMs());
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(anim * color.x, anim * color.y, anim * color.z, 1.f));
-      } else if (textureHasSelection) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.996078f, 0.329412f, 0.f, 1.f));
-      } else {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.f, 0.f, 0.f, 1.00f));
-      }
+    const uint32_t totalTextures = static_cast<uint32_t>(filtered.size());
+    const uint32_t totalRows = (totalTextures + texturesPerRow - 1) / texturesPerRow;
 
-      // Lazily create the tex ID ImGUI wants
-      if (texImgui.texID == VK_NULL_HANDLE) {
-        texImgui.texID = ImGui_ImplVulkan_AddTexture(VK_NULL_HANDLE, texImgui.imageView->handle(), VK_IMAGE_LAYOUT_GENERAL);
+    const float perRowHeight = thumbnailSize + thumbnailSpacing + thumbnailPadding;
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(totalRows), perRowHeight);
+    while (clipper.Step()) {
+      for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+        const uint32_t startIndex = row * texturesPerRow;
+        const uint32_t endIndex = std::min(startIndex + texturesPerRow, totalTextures);
 
-        if (texImgui.texID == VK_NULL_HANDLE) {
-          ONCE(Logger::err("Failed to allocate ImGUI handle for texture, likely because we're trying to render more textures than VkDescriptorPoolCreateInfo::maxSets.  As such, we will truncate the texture list to show only what we can."));
-          return;
-        }
-      }
-
-      const auto& imageInfo = texImgui.imageView->imageInfo();
-
-      // Calculate thumbnail extent with respect to image aspect
-      const float aspect = static_cast<float>(imageInfo.extent.width) / imageInfo.extent.height;
-      const ImVec2 extent {
-        aspect >= 1.f ? thumbnailSize : thumbnailSize * aspect,
-        aspect <= 1.f ? thumbnailSize : thumbnailSize / aspect
-      };
-
-      // Align thumbnail image button
-      const float y = ImGui::GetCursorPosY();
-      ImGui::SetCursorPosX(x + startX + (thumbnailSize - extent.x) / 2.f);
-      ImGui::SetCursorPosY(y + (thumbnailSize - extent.y) / 2.f);
-
-      if (ImGui::ImageButton(texImgui.texID, extent)) {
-        clickedOnTextureButton = true;
-        texture_popup::g_wasLeftClick = true;
-      }
-
-      if (!showLegacyTextureGui() || uniqueId == texture_popup::lastOpenCategoryId) {
-        if (g_jumpto.load() == texHash) {
-          ImGui::SetScrollHereY(0);
-          g_jumpto.exchange(kEmptyHash);
-        }
-      }
-
-      if (!texture_popup::isOpened()) {
-        // if ImageButton is hovered
-        if (ImGui::IsItemHovered()) {
-          // imgui doesn't have right-click on a button, emulate it
-          if (showLegacyTextureGui()) {
-            if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
-              clickedOnTextureButton = true;
-              texture_popup::g_wasLeftClick = false;
-            }
-          }
-
-          foundTextureHash = texHash;
-          highlightColor = HighlightColor::UI;
-
-          // show additional info
-          std::string rtxTextureSelection;
-          for (auto& rtxOption : rtxTextureOptions) {
-            if (rtxOption.textureSetOption->containsHash(texHash)) {
-              if (rtxTextureSelection.empty()) {
-                rtxTextureSelection = "\n";
-              }
-              rtxTextureSelection = str::format(rtxTextureSelection, " - ", rtxOption.displayName, "\n");
-            }
-          }
-          ImGui::SetTooltip("%s(Left click to assign categories. Middle click to copy a texture hash.)\n\nCurrent categories:%s",
-                            makeTextureInfo(texHash, isMaterialReplacement(common->getSceneManager(), texHash)).c_str(),
-                            rtxTextureSelection.empty() ? "\n - None\n" : rtxTextureSelection.c_str());
-          if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
-            ImGui::SetClipboardText(hashToString(texHash).c_str());
-          }
-          texture_popup::lastOpenCategoryId = uniqueId;
-        }
-      }
-
-      ImGui::PopStyleColor(1);
-
-      if (++cnt % texturesPerRow != 0) {
-        x += thumbnailSize + thumbnailSpacing + thumbnailPadding;
-        ImGui::SetCursorPosY(y);
-      } else {
         x = 0;
-        ImGui::SetCursorPosY(y + thumbnailSize + thumbnailSpacing + thumbnailPadding);
+        const float rowBaseY = ImGui::GetCursorPosY();
+
+        for (uint32_t i = startIndex; i < endIndex; ++i) {
+          const XXH64_hash_t texHash = filtered[i];
+          auto it = g_imguiTextureMap.find(texHash);
+          if (it == g_imguiTextureMap.end()) continue;
+          auto& texImgui = it->second;
+
+          // Determine selection for coloring
+          bool textureHasSelection = false;
+          if (isListFiltered) {
+            textureHasSelection = listRtxOption.textureSetOption->containsHash(texHash);
+          } else {
+            for (const auto rtxOption : rtxTextureOptions) {
+              textureHasSelection = rtxOption.textureSetOption->containsHash(texHash);
+              if (textureHasSelection) break;
+            }
+          }
+
+          if (texHash == textureInPopup || texHash == g_jumpto.load()) {
+            const auto blueColor = ImGui::GetStyleColorVec4(ImGuiCol_Button);
+            const auto nvidiaColor = ImVec4(0.462745f, 0.725490f, 0.f, 1.f);
+            const auto color = (texHash == textureInPopup ? blueColor : nvidiaColor);
+            const float anim = animatedHighlightIntensity(GlobalTime::get().absoluteTimeMs());
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(anim * color.x, anim * color.y, anim * color.z, 1.f));
+          } else if (textureHasSelection) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.996078f, 0.329412f, 0.f, 1.f));
+          } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.f, 0.f, 0.f, 1.00f));
+          }
+
+          if (texImgui.texID == VK_NULL_HANDLE) {
+            texImgui.texID = ImGui_ImplVulkan_AddTexture(VK_NULL_HANDLE, texImgui.imageView->handle(), VK_IMAGE_LAYOUT_GENERAL);
+            if (texImgui.texID == VK_NULL_HANDLE) {
+              ONCE(Logger::err("Failed to allocate ImGUI handle for texture, likely because we're trying to render more textures than VkDescriptorPoolCreateInfo::maxSets.  As such, we will truncate the texture list to show only what we can."));
+              ImGui::PopStyleColor(1);
+              descriptorAllocationFailed = true;
+              break;
+            }
+          }
+          texImgui.lastUsedFrame = ctx->getDevice()->getCurrentFrameId();
+
+          const auto& imageInfo = texImgui.imageView->imageInfo();
+          const float aspect = static_cast<float>(imageInfo.extent.width) / imageInfo.extent.height;
+          const ImVec2 extent {
+            aspect >= 1.f ? thumbnailSize : thumbnailSize * aspect,
+            aspect <= 1.f ? thumbnailSize : thumbnailSize / aspect
+          };
+
+          ImGui::SetCursorPosX(x + startX + (thumbnailSize - extent.x) / 2.f);
+          ImGui::SetCursorPosY(rowBaseY + (thumbnailSize - extent.y) / 2.f);
+          if (ImGui::ImageButton(texImgui.texID, extent)) {
+            clickedOnTextureButton = true;
+            texture_popup::g_wasLeftClick = true;
+          }
+
+          if (!showLegacyTextureGui() || uniqueId == texture_popup::lastOpenCategoryId) {
+            if (g_jumpto.load() == texHash) {
+              ImGui::SetScrollHereY(0);
+              g_jumpto.exchange(kEmptyHash);
+            }
+          }
+
+          if (!texture_popup::isOpened()) {
+            if (ImGui::IsItemHovered()) {
+              if (showLegacyTextureGui()) {
+                if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+                  clickedOnTextureButton = true;
+                  texture_popup::g_wasLeftClick = false;
+                }
+              }
+
+              foundTextureHash = texHash;
+              highlightColor = HighlightColor::UI;
+              std::string rtxTextureSelection;
+              for (auto& rtxOption : rtxTextureOptions) {
+                if (rtxOption.textureSetOption->containsHash(texHash)) {
+                  if (rtxTextureSelection.empty()) rtxTextureSelection = "\n";
+                  rtxTextureSelection = str::format(rtxTextureSelection, " - ", rtxOption.displayName, "\n");
+                }
+              }
+              ImGui::SetTooltip("%s(Left click to assign categories. Middle click to copy a texture hash.)\n\nCurrent categories:%s",
+                                makeTextureInfo(texHash, isMaterialReplacement(common->getSceneManager(), texHash)).c_str(),
+                                rtxTextureSelection.empty() ? "\n - None\n" : rtxTextureSelection.c_str());
+              if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
+                ImGui::SetClipboardText(hashToString(texHash).c_str());
+              }
+              texture_popup::lastOpenCategoryId = uniqueId;
+            }
+          }
+
+          ImGui::PopStyleColor(1);
+
+          x += thumbnailSize + thumbnailSpacing + thumbnailPadding;
+        }
+
+        // Advance to next row
+        ImGui::SetCursorPosY(rowBaseY + thumbnailSize + thumbnailSpacing + thumbnailPadding);
+        if (descriptorAllocationFailed) break;
       }
+      if (descriptorAllocationFailed) break;
     }
 
     // popup for texture selection from world / ui
     // Only the "active" category is allowed to control the texture popup and highlighting logic
-    if (!showLegacyTextureGui() || uniqueId == texture_popup::lastOpenCategoryId) {
+    if (!descriptorAllocationFailed && (!showLegacyTextureGui() || uniqueId == texture_popup::lastOpenCategoryId)) {
       const bool wasUIClick = 
         !texture_popup::isOpened() && 
         clickedOnTextureButton;
