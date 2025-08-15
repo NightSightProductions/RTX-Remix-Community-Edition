@@ -188,21 +188,6 @@ namespace dxvk {
       ImGui::Checkbox("Secondary Combined Specular", &compositeSecondaryCombinedSpecularObject());
       ImGui::Unindent();
     }
-    
-    ImGui::Separator();
-    ImGui::TextUnformatted("HDR and UI Settings");
-    {
-      ImGui::Indent();
-      ImGui::Checkbox("Detect UI Textures", &detectUITexturesObject());
-      ImGui::Checkbox("Separate UI Processing", &separateUIProcessingObject());
-      ImGui::DragFloat("HDR UI Brightness", &hdrUIBrightnessObject(), 0.01f, 0.1f, 5.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-      
-      if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Controls the brightness of UI elements when HDR is enabled.\n"
-                         "This affects textures rendered with orthographic projection matrices.");
-      }
-      ImGui::Unindent();
-    }
   }
 
   void CompositePass::showAccumulationImguiSettings() {
@@ -487,13 +472,6 @@ namespace dxvk {
     // Bitwise and used rather than modulus as well for slightly better performance.
     compositeArgs.timeSinceStartMS = static_cast<uint32_t>(GlobalTime::get().absoluteTimeMs()) & ((1U << 24U) - 1U);
     
-    // HDR and UI Processing arguments
-    const bool hdrEnabled = m_device->getCommon()->metaToneMapping().enableHDR();
-    compositeArgs.enableHDR = hdrEnabled;
-    compositeArgs.hdrUIBrightness = hdrUIBrightness();
-    compositeArgs.detectUITextures = detectUITextures();
-    compositeArgs.separateUIProcessing = separateUIProcessing() && hdrEnabled;
-
     RayPortalManager::SceneData portalData = sceneManager.getRayPortalManager().getRayPortalInfoSceneData();
     compositeArgs.numActiveRayPortals = portalData.numActiveRayPortals;
     memcpy(&compositeArgs.rayPortalHitInfos[0], &portalData.rayPortalHitInfos, sizeof(portalData.rayPortalHitInfos));

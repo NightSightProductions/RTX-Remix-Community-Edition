@@ -80,13 +80,6 @@ namespace dxvk {
     RTX_OPTION("rtx.autoExposure", float, autoExposureSpeed, 5.f, "Average exposure changing speed (in units per second) when the image changes.");
     RTX_OPTION("rtx.autoExposure", float, evMinValue, -2.0f, "Min/Max values tuned by moving from bright/dark locations in game, and adjusting until they look correct.");
     RTX_OPTION("rtx.autoExposure", float, evMaxValue, 5.f, "Min/Max values tuned by moving from bright/dark locations in game, and adjusting until they look correct.");
-    
-    // HDR-specific auto exposure settings
-    RTX_OPTION("rtx.autoExposure", float, hdrEvMinValue, -2.0f, "HDR minimum EV value. Lower values allow adaptation to darker HDR scenes. Range: [-6.0, 0.0]");
-    RTX_OPTION("rtx.autoExposure", float, hdrEvMaxValue, 8.0f, "HDR maximum EV value. Higher values allow adaptation to brighter HDR scenes. Range: [3.0, 12.0]");
-    RTX_OPTION("rtx.autoExposure", float, hdrAutoExposureSpeed, 3.0f, "HDR auto exposure adaptation speed. Lower values = slower adaptation to HDR content changes. Range: [0.1, 20.0]");
-    RTX_OPTION("rtx.autoExposure", bool, useHDRSpecificSettings, true, "Use separate settings for HDR auto exposure. When disabled, uses standard SDR settings for HDR content.");
-    
     RTX_OPTION("rtx.autoExposure", bool,  exposureCenterMeteringEnabled, false, "Gives higher weight to pixels around the screen center.");
     RTX_OPTION("rtx.autoExposure", float, centerMeteringSize, 0.5f, "The importance of pixels around the screen center.");
     RTX_OPTION("rtx.autoExposure", ExposureAverageMode, exposureAverageMode, ExposureAverageMode::Median, "Average mode. Valid values: <Mean=0, Median=1>. The mean mode averages exposures across pixels. The median mode is more stable for extreme pixel values.");

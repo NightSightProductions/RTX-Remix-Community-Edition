@@ -381,10 +381,6 @@ namespace dxvk::vk {
     VULKAN_FN(vkQueuePresentKHR);
     #endif
 
-    #ifdef VK_EXT_hdr_metadata
-    VULKAN_FN(vkSetHdrMetadataEXT);
-    #endif
-
     #ifdef VK_EXT_conditional_rendering
     VULKAN_FN(vkCmdBeginConditionalRenderingEXT);
     VULKAN_FN(vkCmdEndConditionalRenderingEXT);
