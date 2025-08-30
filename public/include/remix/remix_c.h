@@ -405,7 +405,6 @@ extern "C" {
   typedef enum remixapi_InstanceCategoryBit {
     REMIXAPI_INSTANCE_CATEGORY_BIT_WORLD_UI                  = 1 << 0,
     REMIXAPI_INSTANCE_CATEGORY_BIT_WORLD_MATTE               = 1 << 1,
-    REMIXAPI_INSTANCE_CATEGORY_BIT_LEGACY_EMISSIVE           = 1 << 23,
     REMIXAPI_INSTANCE_CATEGORY_BIT_SKY                       = 1 << 2,
     REMIXAPI_INSTANCE_CATEGORY_BIT_IGNORE                    = 1 << 3,
     REMIXAPI_INSTANCE_CATEGORY_BIT_IGNORE_LIGHTS             = 1 << 4,

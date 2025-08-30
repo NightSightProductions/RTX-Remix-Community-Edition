@@ -202,7 +202,6 @@ private:
   bool m_isHidden = false;
   bool m_isPlayerModel = false;
   bool m_isWorldSpaceUI = false;
-  bool m_isLegacyEmissive = false;
   bool m_isUnordered = false;
   bool m_isObjectToWorldMirrored = false;
   bool m_isCreatedByRenderer = false;
