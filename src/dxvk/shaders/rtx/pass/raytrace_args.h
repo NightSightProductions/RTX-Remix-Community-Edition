@@ -381,7 +381,11 @@ struct RaytraceArgs {
   uint allowNrcTraining;
 
   float vertexColorStrength;
-  uint vertexColorIsBakedLighting;
+  uint pad0;
+
+  float wboitEnergyLossCompensation;
+  float wboitDepthWeightTuning;
+  uint wboitEnabled;
 
   uint3 pad_xess;
 
