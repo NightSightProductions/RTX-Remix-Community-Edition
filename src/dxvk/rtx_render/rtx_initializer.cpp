@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2022-2023, NVIDIA CORPORATION. All rights reserved.
+* Copyright (c) 2022-2025, NVIDIA CORPORATION. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -30,6 +30,7 @@
 #include "rtx_render/rtx_texture_manager.h"
 #include "rtx_io.h"
 #include "dxvk_raytracing.h"
+#include "rtx_debug_view.h"
 
 namespace dxvk {
   RtxInitializer::RtxInitializer(DxvkDevice* device)
@@ -61,19 +62,19 @@ namespace dxvk {
         env::getEnvVar("DXVK_GRAPHICS_PRESET_TYPE") != "0") {
       const DxvkDeviceInfo& deviceInfo = m_device->adapter()->devicePropertiesExt();
 
-      RtxOptions::Get()->updateUpscalerFromDlssPreset();
-      RtxOptions::Get()->updateGraphicsPresets(m_device);
-      RtxOptions::Get()->updateRaytraceModePresets(deviceInfo.core.properties.vendorID, deviceInfo.khrDeviceDriverProperties.driverID);
+      RtxOptions::updateUpscalerFromDlssPreset();
+      RtxOptions::updateGraphicsPresets(m_device);
+      RtxOptions::updateRaytraceModePresets(deviceInfo.core.properties.vendorID, deviceInfo.khrDeviceDriverProperties.driverID);
     } else {
       // Default, init to custom unless otherwise specified
-      if (RtxOptions::Get()->graphicsPreset() == GraphicsPreset::Auto) {
-        RtxOptions::Get()->graphicsPresetRef() = GraphicsPreset::Custom;
+      if (RtxOptions::graphicsPreset() == GraphicsPreset::Auto) {
+        RtxOptions::graphicsPreset.setDeferred(GraphicsPreset::Custom);
       }
 
       // Need to initialize DLSS-RR settings in test cases.
       // Warning: this will override multiple global options, including any values set by the test workflow.
       if (env::getEnvVar("DXVK_RAY_RECONSTRUCTION") != "0") {
-        RtxOptions::Get()->updateLightingSetting();
+        RtxOptions::updateLightingSetting();
       }
     }
 
@@ -81,6 +82,9 @@ namespace dxvk {
     ShaderManager::getInstance()->addGlobalExtraLayout(pCommon->getSceneManager().getBindlessResourceManager().getGlobalBindlessTableLayout(BindlessResourceManager::Buffers));
     ShaderManager::getInstance()->addGlobalExtraLayout(pCommon->getSceneManager().getBindlessResourceManager().getGlobalBindlessTableLayout(BindlessResourceManager::Textures));
     ShaderManager::getInstance()->addGlobalExtraLayout(pCommon->getSceneManager().getBindlessResourceManager().getGlobalBindlessTableLayout(BindlessResourceManager::Samplers));
+
+    // Need to promote all of the hardware support Options before prewarming shaders.
+    RtxOption<bool>::applyPendingValues();
 
     // Kick off shader prewarming
     startPrewarmShaders();

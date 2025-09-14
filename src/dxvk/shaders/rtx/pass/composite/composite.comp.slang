@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2022-2023, NVIDIA CORPORATION. All rights reserved.
+* Copyright (c) 2022-2025, NVIDIA CORPORATION. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -37,6 +37,7 @@
 #include "rtx/utility/geometry_flags.slangh"
 
 #include "rtx/algorithm/volume_composite_helpers.slangh"
+#include "rtx/algorithm/accumulate.slangh"
 
 #define D3DFOG_NONE   0
 #define D3DFOG_EXP    1
@@ -401,7 +402,11 @@ void main(uint2 thread_id : SV_DispatchThreadID, uint2 localIndex : SV_GroupThre
 
             const float transparencyBandwidth = 0.05;
             const float distanceWeight = 0.5;
-            float weight = exp(-abs(neighborSurface.backgroundTransparency - surface.backgroundTransparency) / transparencyBandwidth + -distanceWeight* dot(offset, offset));
+            float weight = exp(
+              -abs(neighborSurface.backgroundTransparency - surface.backgroundTransparency) / transparencyBandwidth +
+              // Note: Convert offset to float to avoid need for integer dot product Vulkan feature to be enabled.
+              -distanceWeight * dot(float2(offset), float2(offset))
+            );
 
             minHitT = min(minHitT, neighborSurface.hitT);
             maxHitT = max(maxHitT, neighborSurface.hitT);
@@ -507,7 +512,7 @@ void main(uint2 thread_id : SV_DispatchThreadID, uint2 localIndex : SV_GroupThre
   radianceOutput += sharedRadiance;
   
   // Add sky radiance
-  if(primaryMiss)
+  if (primaryMiss)
   {
     if (cb.domeLightArgs.active)
     {
@@ -571,6 +576,8 @@ void main(uint2 thread_id : SV_DispatchThreadID, uint2 localIndex : SV_GroupThre
     // Output final composite result for NRD denoiser.
     finalOutput.xyz = attenuatedOutput * backgroundAlpha + alphaBlendOutput.xyz;
   }
+
+  finalOutput = accumulate(thread_id.xy, finalOutput, cb.accumulationArgs, true, AccumulatedFinalOutput);
   
   imageStore(FinalOutput, thread_id.xy, finalOutput);
 

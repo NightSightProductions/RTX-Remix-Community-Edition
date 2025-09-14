@@ -32,6 +32,7 @@
 #include "rtx/pass/raytrace_args.h"
 #include "rtx_neural_radiance_cache.h"
 #include "rtx_render/rtx_restir_gi_rayquery.h"
+#include "rtx_debug_view.h"
 
 #include <rtx_shaders/demodulate.h>
 
@@ -89,6 +90,7 @@ namespace dxvk {
     VkExtent3D workgroups = util::computeBlockCount(numRaysExtent, VkExtent3D{ 16, 8, 1 });
 
     ScopedGpuProfileZone(ctx, "Demodulate");
+    ctx->setFramePassStage(RtxFramePassStage::Demodulate);
 
     Rc<DxvkBuffer> constantsBuffer = ctx->getResourceManager().getConstantsBuffer();
     DebugView& debugView = ctx->getDevice()->getCommon()->metaDebugView();

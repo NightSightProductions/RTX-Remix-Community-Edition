@@ -23,10 +23,13 @@
 #include "dxvk_instance.h"
 #include "rtx_render/rtx_context.h"
 #include "dxvk_scoped_annotation.h"
+#include "rtx_render/rtx_ray_reconstruction.h"
 #include "rtx_render/rtx_texture_manager.h"
 #include "rtx_render/rtx_neural_radiance_cache.h"
 #include "rtx_render/rtx_rtxdi_rayquery.h"
 #include "rtx_render/rtx_restir_gi_rayquery.h"
+#include "rtx_render/rtx_composite.h"
+#include "rtx_render/rtx_debug_view.h"
 
 
 namespace dxvk {
@@ -545,6 +548,7 @@ namespace dxvk {
     m_rayReconstruction(device),
     m_nis(device),
     m_taa(device),
+    m_xess(device),
     m_composite(device),
     m_debug_view(device),
     m_autoExposure(device),

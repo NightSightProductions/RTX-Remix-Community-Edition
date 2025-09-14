@@ -36,3 +36,9 @@
 [submodule "submodules/nvapi/nvapi"]
 	path = submodules/nvapi
 	url = https://github.com/NVIDIA/nvapi.git
+[submodule "submodules/Detours"]
+	path = submodules/Detours
+	url = https://github.com/microsoft/Detours.git
+[submodule "submodules/xess"]
+	path = submodules/xess
+	url = https://github.com/intel/xess.git

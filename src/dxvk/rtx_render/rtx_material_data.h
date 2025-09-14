@@ -58,6 +58,9 @@
   X(MetallicConstant,                 metallic_constant,                      float,          0.f,                        1.f,                       0.f) \
   X(EmissiveColorConstant,            emissive_color_constant,                Vector3,        Vector3(0.f),               Vector3(1.f),              Vector3(1.0f, 0.1f, 0.1f)) \
   X(EnableEmission,                   enable_emission,                        bool,           false,                      true,                      false) \
+  X(EmissiveAlphaMask,                emissive_alpha_mask,                    bool,           false,                      true,                      false) \
+  X(EmissiveAlphaInvert,              emissive_alpha_invert,                  bool,           false,                      true,                      false) \
+  X(EmissiveColorTint,                emissive_color_tint,                    Vector3,        Vector3(0.f),               Vector3(10.f),             Vector3(1.0f, 1.0f, 1.0f)) \
   X(SpriteSheetRows,                  sprite_sheet_rows,                      uint8_t,        0,                          255,                       0) \
   X(SpriteSheetCols,                  sprite_sheet_cols,                      uint8_t,        0,                          255,                       0) \
   X(SpriteSheetFPS,                   sprite_sheet_fps,                       uint8_t,        0,                          255,                       0) \
@@ -165,11 +168,13 @@
 #define WRITE_CONSTANT_MEMBER_FUNC(name, usd_attr, type, minVal, maxVal, defaultVal) \
       type& get##name() { return m_##name; } \
       const type& get##name() const { return m_##name; } \
+      void set##name(const type value) { m_##name = value; m_dirty.set(DirtyFlags::k_##name); sanitizeData(); updateCachedHash(); } \
       static pxr::TfToken get##name##Token() { return pxr::TfToken("inputs:"#usd_attr); }
 
 #define WRITE_TEXTURE_MEMBER_FUNC(name, usd_attr, type, minVal, maxVal, defaultVal) \
       type& get##name() { return m_##name; } \
       const type& get##name() const { return m_##name; } \
+      void set##name(const type value) { m_##name = value; m_dirty.set(DirtyFlags::k_##name); sanitizeData(); updateCachedHash(); } \
       static pxr::TfToken get##name##Token() { return pxr::TfToken("inputs:"#usd_attr); }
 
 #define WRITE_CONSTANT_DESERIALIZER(name, usd_attr, type, minVal, maxVal, defaultVal) \
@@ -254,6 +259,22 @@ struct name##Data {                                                             
     return m_cachedHash;                                                                             \
   }                                                                                                  \
                                                                                                      \
+  void setSamplerOverride(const Rc<DxvkSampler>& sampler) {                                          \
+    m_samplerOverride = sampler;                                                                     \
+  }                                                                                                  \
+                                                                                                     \
+  const Rc<DxvkSampler>& getSamplerOverride() const {                                                \
+    return m_samplerOverride;                                                                        \
+  }                                                                                                  \
+                                                                                                     \
+  void setIgnoreAlphaChannel(const bool ignoreAlphaChannel) {                                        \
+    m_ignoreAlphaChannelOverride = ignoreAlphaChannel;                                               \
+  }                                                                                                  \
+                                                                                                     \
+  const bool getIgnoreAlphaChannel() const {                                                         \
+    return m_ignoreAlphaChannelOverride;                                                             \
+  }                                                                                                  \
+                                                                                                     \
 private:                                                                                             \
                                                                                                      \
   struct Ranges {                                                                                    \
@@ -265,6 +286,10 @@ private:                                                                        
   void sanitizeData() {                                                                              \
     constexpr Ranges ranges = {};                                                                    \
     X_CONSTANTS(WRITE_CONSTANT_SANITIZATION)                                                         \
+    /* This matches the behavior of materials in toolkit */                                          \
+    if (m_dirty.test(DirtyFlags::k_EnableEmission)) {                                                \
+      m_dirty.set(DirtyFlags::k_EmissiveIntensity);                                                  \
+    }                                                                                                \
   }                                                                                                  \
                                                                                                      \
   void updateCachedHash() {                                                                          \
@@ -282,6 +307,8 @@ private:                                                                        
                                                                                                      \
   Flags<DirtyFlags> m_dirty { 0 };                                                                   \
   XXH64_hash_t m_cachedHash { 0 };                                                                   \
+  Rc<DxvkSampler> m_samplerOverride = nullptr;                                                       \
+  bool m_ignoreAlphaChannelOverride = false;                                                         \
 };
 
 namespace dxvk {

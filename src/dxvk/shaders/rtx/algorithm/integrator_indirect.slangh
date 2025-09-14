@@ -526,6 +526,8 @@ void integratePathVertex(
     {
       // Sample a new direction
       float16_t sampledLobePdf, solidAnglePdf;
+
+      // Note: If this sample is invalid the throughput and solid angle pdf will be set to 0.
       const Ray sampledRay = sampleDirection(
         randomState, pathState.insideMedium, continuationThroughput,
         ray, rayInteraction, surfaceInteraction,
@@ -594,6 +596,7 @@ void integratePathVertex(
           const float planeTolerance = 0.1;
           const float distanceTolerance = 0.01;
           isWithinGbuffer = dot(surfaceInteraction.interpolatedNormal, gbuffer.triangleNormal) > 0.8f &&   // sane normal difference?
+                            gbuffer.isValid && // was this pixel valid
                             (relativeLength < cameraDistance * distanceTolerance ||
                              abs(dot(relativePosition, surfaceInteraction.interpolatedNormal)) < planeTolerance * relativeLength);
         }
@@ -738,9 +741,22 @@ void integratePathVertex(
     // cast another ray.
     pathState.continuePath = true;
     
-    // Todo: Allow minimum/maximum bounce iterations to be set by ray tracing args.
     if (pathState.bounceIteration >= pathState.pathMaxBounces)
     {
+      // Note: Don't continue paths past the maximum number of requested bounces.
+      pathState.continuePath = false;
+    }
+    else if (all(continuationThroughput == vec3(0.0f)))
+    {
+      // Note: Don't continue paths with zero continuation throughput from the sampled direction, be it as a
+      // signal for invalid direction samples or simply having all the energy reduced to 0 by albedo for instance.
+      // This is done as while russian roulette will typically handle this properly (a throughput of 0 means a
+      // probability of 0), the current implementation allows for non-throughput based russian roulettes, or even
+      // for it to be disabled entierly, which would allow potentially invalid direction samples to continue and
+      // generate issues for subsequent bounces. As such this case needs to be handled explicitly. In the future
+      // it may even be a better idea to return a boolean from the material's direction sampling function to
+      // avoid this potential mistake by forcing callers to consider the boolean separately rather than encoding
+      // it in the throughput.
       pathState.continuePath = false;
     }
     else if (pathState.calculateUseRussianRoulette())
@@ -749,11 +765,12 @@ void integratePathVertex(
       // Note: This logic will conditionally terminate paths based on the effective throughput, allowing for
       // paths which contribute little to the final image to be shorter while paths which are more important
       // are allowed to be longer.
-  
-      float continueProbability = calculateRussianRouletteContinueProbability(
+
+      const float continueProbability = calculateRussianRouletteContinueProbability(
         pathState,
-        isOpaqueMaterial, 
+        isOpaqueMaterial,
         continuationLobe != opaqueLobeTypeDiffuseReflection,
+        continuationThroughput,
         opaqueSurfaceMaterialInteraction.isotropicRoughness,
         rayInteraction.hitDistance / pathState.accumulatedHitDistance);
     
@@ -812,6 +829,7 @@ void integratePathVertex(
     
         isWithinGbuffer =
           dot(surfaceInteraction.triangleNormal, prevSurfaceInteraction.triangleNormal) > 0.8f &&
+          prevSurfaceInteraction.isValid &&
           (relativeLength < prevHitDistance * distanceTolerance ||
             abs(dot(prevSurfaceInteraction.triangleNormal, relativePosition)) < relativeLength * planeTolerance);
       }
@@ -1206,12 +1224,15 @@ void integrateIndirectPath(
 
   initReSTIRGI(pathState, geometryFlags, firstHitPerceptualRoughness, firstSampledLobePdf, firstSampledSolidAnglePdf);
 
-  if (firstSampledSolidAnglePdf == float16_t(0))
+  // Note: Initialize the continue path flag based on if an indirect ray should actually be cast, e.g. if the PDF
+  // and throughput are non-zero (as these being 0 indicates often that the sampled ray direction is invalid and should
+  // not be used).
+  if (firstSampledSolidAnglePdf == 0.0h)
   {
     pathState.continuePath = false;
   }
 
-  pathState.continuePath &= any(pathState.throughput > 0.h);
+  pathState.continuePath &= any(pathState.throughput > 0.0h);
 
   if (pathState.continuePath)
   {
@@ -1220,7 +1241,10 @@ void integrateIndirectPath(
       RAB_RandomSamplerState rtxdiRNG = RAB_InitRandomSampler(pathState.pixelCoordinate, cb.frameIdx, pathState.bounceIteration);
       uint jitter = sampleUniformIntRng(rtxdiRNG);
       MinimalSurfaceInteraction gbuffer = minimalSurfaceInteractionReadFromGBuffer(gbufferPixelCoordinate, indirectPathTextures.PrimaryWorldPositionWorldTriangleNormal);
-      pathState.neeCacheCellOffset = NEECache.pointToOffset(rayOrigin, gbuffer.triangleNormal, jitter);
+      if(gbuffer.isValid)
+      {
+        pathState.neeCacheCellOffset = NEECache.pointToOffset(rayOrigin, gbuffer.triangleNormal, jitter);
+      }
     }
 
 #ifdef OPAQUE_MATERIAL_USE_POM

@@ -31,6 +31,8 @@
 
 #include "rtx_imgui.h"
 
+#include "../util/util_globaltime.h"
+
 #include "rtx/pass/common_binding_indices.h"
 
 // #define VALIDATION_MODE
@@ -653,7 +655,7 @@ namespace dxvk {
     bool isOpacityMicromapSupported = device.extensions().khrSynchronization2 &&
                                       device.extensions().extOpacityMicromap;
 
-    if (device.instance()->areVulkanValidationLayersEnabled() && isOpacityMicromapSupported) {
+    if (RtxOptions::areValidationLayersEnabled() && isOpacityMicromapSupported) {
       Logger::warn(str::format("[RTX] Opacity Micromap vendor extension is not compatible with VK Validation Layers. Disabling Opacity Micromap extension."));
       isOpacityMicromapSupported = false;
     }
@@ -666,7 +668,7 @@ namespace dxvk {
     InstanceEventHandler instanceEvents(this);
     instanceEvents.onInstanceAddedCallback = [this](const RtInstance& instance) { onInstanceAdded(instance); };
     instanceEvents.onInstanceAddedCallback = [this](const RtInstance& instance) { onInstanceAdded(instance); };
-    instanceEvents.onInstanceUpdatedCallback = [this](const RtInstance& instance, const RtSurfaceMaterial& material, bool hasTransformChanged, bool hasVerticesChanged) { onInstanceUpdated(instance, material, hasTransformChanged, hasVerticesChanged); };
+    instanceEvents.onInstanceUpdatedCallback = [this](const RtInstance& instance, const DrawCallState& drawCall, const MaterialData& material, bool hasTransformChanged, bool hasVerticesChanged, bool isFirstUpdateThisFrame) { onInstanceUpdated(instance, drawCall, material, hasTransformChanged, hasVerticesChanged, isFirstUpdateThisFrame); };
     instanceEvents.onInstanceDestroyedCallback = [this](const RtInstance& instance) { onInstanceDestroyed(instance); };
     return instanceEvents;
   }
@@ -713,9 +715,11 @@ namespace dxvk {
   }
 
   void OpacityMicromapManager::onInstanceUpdated(const RtInstance& instance,
-                                                 const RtSurfaceMaterial& material,
+                                                 const DrawCallState& /*drawCall*/,
+                                                 const MaterialData& /*material*/,
                                                  const bool hasTransformChanged,
-                                                 const bool hasVerticesChanged) {
+                                                 const bool hasVerticesChanged,
+                                                 const bool isFirstUpdateThisFrame) {
     ScopedCpuProfileZone();
 
     // Skip calculating data needed for new OMMs if there's not enough memory to build any OMM request
@@ -986,8 +990,8 @@ namespace dxvk {
       return false;
     }
 
-    if ((instance.getMaterialType() != RtSurfaceMaterialType::Opaque &&
-         instance.getMaterialType() != RtSurfaceMaterialType::RayPortal)) {
+    if ((instance.getMaterialType() != MaterialDataType::Opaque &&
+         instance.getMaterialType() != MaterialDataType::RayPortal)) {
       return false;
     }
 
@@ -1016,14 +1020,14 @@ namespace dxvk {
     if ((!alphaState.isFullyOpaque && alphaState.isParticle) || alphaState.emissiveBlend) {
       // Alpha-blended and emissive particles
       useOpacityMicromap = true;
-    } else if (instance.getMaterialType() == RtSurfaceMaterialType::Opaque && 
+    } else if (instance.isOpaque() &&
                !instance.surface.alphaState.isFullyOpaque && 
                instance.surface.alphaState.isBlendingDisabled) {
       // Alpha-tested geometry
       useOpacityMicromap = true;
-    } else if (instance.getMaterialType() == RtSurfaceMaterialType::Opaque && !alphaState.isFullyOpaque) {
+    } else if (instance.isOpaque() && !alphaState.isFullyOpaque) {
       useOpacityMicromap = true;
-    } else if (instance.getMaterialType() == RtSurfaceMaterialType::RayPortal) {
+    } else if (instance.getMaterialType() == MaterialDataType::RayPortal) {
       useOpacityMicromap = true;
     }
 
@@ -1041,11 +1045,14 @@ namespace dxvk {
         switch (surface.textureAlphaOperation) {
         case DxvkRtTextureOperation::SelectArg1:
           if (surface.textureAlphaArg1Source == RtTextureArgSource::TFactor)
-            useOpacityMicromap &= tFactorAlpha > RtxOptions::Get()->getResolveTransparencyThreshold();
+            useOpacityMicromap &= tFactorAlpha > RtxOptions::resolveTransparencyThreshold();
           break;
         case DxvkRtTextureOperation::SelectArg2:
           if (surface.textureAlphaArg2Source == RtTextureArgSource::TFactor)
-            useOpacityMicromap &= tFactorAlpha > RtxOptions::Get()->getResolveTransparencyThreshold();
+            useOpacityMicromap &= tFactorAlpha > RtxOptions::resolveTransparencyThreshold();
+          break;
+        default:
+          // This code currently only optimizes a couple of common cases.
           break;
         }
       }
@@ -1080,7 +1087,7 @@ namespace dxvk {
       return false;
 
     // RayPortal materials use two opacity maps, see if the second one is already loaded
-    if (instance.getMaterialType() == RtSurfaceMaterialType::RayPortal &&
+    if (instance.getMaterialType() == MaterialDataType::RayPortal &&
         !isIndexOfFullyResidentTexture(instance.getSecondaryOpacityTextureIndex(), textures))
       return false;
 
@@ -1445,6 +1452,8 @@ namespace dxvk {
       m_boundOMMs.push_back(ommCacheItem.blasOmmBuffers);
       break;
     }
+    case OpacityMicromapCacheState::eUnknown:
+      assert(false && "eUnknown OpacityMicromapCacheState in OpacityMicromapManager::bindOpacityMicromap");
     }
 
     if (ommCacheState == OpacityMicromapCacheState::eStep3_Built)
@@ -1743,8 +1752,8 @@ namespace dxvk {
       desc.conservativeEstimationMaxTexelTapsPerMicroTriangle = OpacityMicromapOptions::Building::ConservativeEstimation::maxTexelTapsPerMicroTriangle();
       desc.numTriangles = numTriangles;
       desc.triangleOffset = sourceData.triangleOffset;
-      desc.resolveTransparencyThreshold = RtxOptions::Get()->getResolveTransparencyThreshold();
-      desc.resolveOpaquenessThreshold = RtxOptions::Get()->getResolveOpaquenessThreshold();
+      desc.resolveTransparencyThreshold = RtxOptions::resolveTransparencyThreshold();
+      desc.resolveOpaquenessThreshold = RtxOptions::resolveOpaquenessThreshold();
       desc.costPerTexelTapPerMicroTriangleBudget = OpacityMicromapOptions::Building::costPerTexelTapPerMicroTriangleBudget();
 
       // Overrides
@@ -2297,13 +2306,12 @@ namespace dxvk {
 
   void OpacityMicromapManager::buildOpacityMicromaps(Rc<DxvkContext> ctx,
                                                      const std::vector<TextureRef>& textures,
-                                                     uint32_t lastCameraCutFrameId,
-                                                     float frameTimeMilliseconds) {
+                                                     uint32_t lastCameraCutFrameId) {
 
     // Get the workload scale in respect to 60 Hz for a given frame time.
     // 60 Hz is the baseline since that's what the per-second budgets have been parametrized at in RtxOptions
     const float kFrameTime60Hz = 1 / 60.f;
-    const float frameTimeSecs = frameTimeMilliseconds * 0.001f;
+    const float frameTimeSecs = GlobalTime::get().deltaTime();
     float workloadScalePerSecond = frameTimeSecs / kFrameTime60Hz;
 
     // Modulate the scale for practical FPS range (i.e. <25, 200>) to even out the OMM's per frame percentage performance overhead

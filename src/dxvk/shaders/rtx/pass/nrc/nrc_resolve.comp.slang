@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+* Copyright (c) 2024-2025, NVIDIA CORPORATION. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -23,9 +23,9 @@
 
 #include "rtx/pass/nrc/nrc_resolve_binding_indices.h"
 
-#define ENABLE_NRC 1  // Needed to access global values guarded behind by the define
+#define ENABLE_NRC 1  // Needed to access global values guarded by the define
 #include "rtx/external/NRC.slangh"
-#include "../../../submodules/nrc/include/NRCHelpers.hlsli"
+#include "nrc/include/NRCHelpers.hlsli"
 #include "rtx/utility/geometry_flags.slangh"
 #include "rtx/concept/ray/ray_helper.slangh"
 #include "rtx/pass/raytrace_args.h"
@@ -48,7 +48,7 @@ layout(binding = NRC_RESOLVE_BINDING_NRC_DEBUG_TRAINING_PATH_INFO_INPUT_OUTPUT)
 RWStructuredBuffer<NrcDebugTrainingPathInfo> DebugTrainingPathInfo;
 
 layout(r16ui, binding = NRC_RESOLVE_BINDING_SHARED_FLAGS_INPUT)
-Texture2D<uint> SharedFlags;
+Texture2D<uint16_t> SharedFlags;
 
 
 layout(binding = NRC_RESOLVE_BINDING_RAYTRACE_ARGS_INPUT)

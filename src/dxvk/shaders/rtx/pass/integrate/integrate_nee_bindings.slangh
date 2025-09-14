@@ -28,7 +28,7 @@
 // Shared Inputs
 
 layout(r16ui, binding = INTEGRATE_NEE_BINDING_SHARED_FLAGS_INPUT)
-Texture2D<uint> SharedFlags;
+Texture2D<uint16_t> SharedFlags;
 
 layout(r32ui, binding = INTEGRATE_NEE_BINDING_SHARED_MATERIAL_DATA0_INPUT)
 Texture2D<uint> SharedMaterialData0;
@@ -40,13 +40,13 @@ layout(rg32f, binding = INTEGRATE_NEE_BINDING_SHARED_TEXTURE_COORD_INPUT)
 Texture2D<float2> SharedTextureCoord;
 
 layout(r16ui, binding = INTEGRATE_NEE_BINDING_SHARED_SURFACE_INDEX_INPUT)
-Texture2D<uint> SharedSurfaceIndex;
+Texture2D<uint16_t> SharedSurfaceIndex;
 
-layout(rgba16ui, binding = INTEGRATE_NEE_BINDING_SHARED_SUBSURFACE_DATA_INPUT)
-Texture2D<uint4> SharedSubsurfaceData;
+layout(rg16ui, binding = INTEGRATE_NEE_BINDING_SHARED_SUBSURFACE_DATA_INPUT)
+Texture2D<uint2> SharedSubsurfaceData;
 
-layout(r11f_g11f_b10f, binding = INTEGRATE_NEE_BINDING_SHARED_SUBSURFACE_DIFFUSION_PROFILE_DATA_INPUT)
-Texture2D<float3> SharedSubsurfaceDiffusionProfileData;
+layout(rg32ui, binding = INTEGRATE_NEE_BINDING_SHARED_SUBSURFACE_DIFFUSION_PROFILE_DATA_INPUT)
+Texture2D<uint2> SharedSubsurfaceDiffusionProfileData;
 
 // Primary Inputs
 
@@ -91,7 +91,7 @@ RWTexture2D<float4> PrimaryBaseReflectivity;
 // Inputs / Outputs
 
 layout(binding = INTEGRATE_NEE_BINDING_NRC_TRAINING_PATH_VERTICES_INPUT_OUTPUT)
-RWStructuredBuffer<NrcPackedPathVertex> TrainingPathVertices;
+NRC_RW_STRUCTURED_BUFFER(NrcPackedPathVertex) TrainingPathVertices;
 
 
 // Outputs

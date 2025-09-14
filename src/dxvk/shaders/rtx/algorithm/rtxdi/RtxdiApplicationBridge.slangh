@@ -194,7 +194,7 @@ RAB_Surface RAB_EmptySurface()
   surface.opaqueSurfaceMaterialInteraction.anisotropicRoughness = f16vec2(1, 1);
   surface.opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.packedTransmittanceColor = 0;
   surface.opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.measurementDistance = 0.0h;
-  surface.opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.singleScatteringAlbedo = 0.0h;
+  surface.opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.packedSingleScatteringAlbedo = 0;
   surface.opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.volumetricAnisotropy = 0.0h;
   surface.opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.maxSampleRadius = 0.0h;
   surface.hitDistance = RAB_SURFACE_BACKGROUND_HIT_DISTANCE;
@@ -464,7 +464,7 @@ float RAB_GetLightSampleTargetPdfForVolume(RAB_LightSample lightSample, RAB_Volu
     const float3 lightDirection = normalize(volumeInteraction.volumeInteraction.position - lightSample.position);
     const float lightSampleDistance = distance(volumeInteraction.volumeInteraction.position, lightSample.position);
     
-    volumeAttenuation = calcAtmosphereAttenuation(cb.volumeArgs, false, lightSampleDistance, lightSample.position, lightDirection);
+    volumeAttenuation = calcVolumetricAttenuation(cb.volumeArgs, none, false, lightSampleDistance, lightSample.position, lightDirection);
   }
 
   const float targetPdf = calcBt709Luminance(lightSample.radiance * volumeAttenuation) * phaseWeight * lightThroughput;
@@ -519,6 +519,12 @@ RAB_Surface RAB_GetSurfaceForTemporalBiasCorrection(RAB_Surface currentSurface, 
     if (cb.enablePreviousTLAS || all(virtualMotionVector == 0)) {
       const MinimalSurfaceInteraction temporalSurfaceInteraction = minimalSurfaceInteractionReadFromGBuffer(
         prevPixelID, PreviousWorldPosition_WorldTriangleNormal);
+      // Check the previous frames gbuffer data is valid.
+      if (!temporalSurfaceInteraction.isValid)
+      {
+        return temporalSurface;
+      }
+  
       temporalSurface.minimalSurfaceInteraction.position = temporalSurfaceInteraction.position;
       temporalSurface.minimalSurfaceInteraction.triangleNormal = temporalSurfaceInteraction.triangleNormal;
       temporalSurface.minimalSurfaceInteraction.triangleTangent = temporalSurfaceInteraction.triangleTangent;

@@ -63,7 +63,7 @@ namespace dxvk {
   void AccelManager::garbageCollection() {
     // Can be configured per game: 'rtx.numFramesToKeepBLAS'
     // Note: keep the BLAS for at least two frames so that they're alive for previous-frame TLAS access.
-    const uint32_t numFramesToKeepBLAS = std::max(RtxOptions::enablePreviousTLAS() ? 2u : 1u, RtxOptions::Get()->getNumFramesToKeepBLAS());
+    const uint32_t numFramesToKeepBLAS = std::max(RtxOptions::enablePreviousTLAS() ? 2u : 1u, RtxOptions::numFramesToKeepBLAS());
 
     // Remove instances past their lifetime or marked for GC explicitly
     const uint32_t currentFrame = m_device->getCurrentFrameId();
@@ -85,12 +85,36 @@ namespace dxvk {
   
   PooledBlas::PooledBlas() {
     ++g_blasCount;
+    buildInfo.geometryCount = 0;
+    buildInfo.pGeometries = nullptr;
   }
 
   PooledBlas::~PooledBlas() {
+    if (buildInfo.pGeometries) {
+      delete[] buildInfo.pGeometries;
+      buildInfo.pGeometries = nullptr;
+    }
     accelerationStructureReference = 0;
     accelStructure = nullptr;
     --g_blasCount;
+  }
+
+  // Keep a copy of the build info to validate it for potential updateability
+  static void copyAccelerationStructureBuildGeometryInfo(const VkAccelerationStructureBuildGeometryInfoKHR& srcInfo, VkAccelerationStructureBuildGeometryInfoKHR& dstInfo)
+  {
+    const VkAccelerationStructureGeometryKHR* pGeometries = dstInfo.pGeometries;
+    if (srcInfo.pGeometries) {
+      if (srcInfo.geometryCount != dstInfo.geometryCount) {
+        if (pGeometries) {
+          delete[] pGeometries;
+        }
+        pGeometries = new VkAccelerationStructureGeometryKHR[srcInfo.geometryCount];
+      }
+      std::memcpy((void*) pGeometries, srcInfo.pGeometries, srcInfo.geometryCount * sizeof(VkAccelerationStructureGeometryKHR));
+
+      dstInfo = srcInfo;
+      dstInfo.pGeometries = pGeometries;
+    }
   }
 
   uint32_t AccelManager::getBlasCount() {
@@ -364,8 +388,7 @@ namespace dxvk {
                                             const std::vector<TextureRef>& textures,
                                             const CameraManager& cameraManager,
                                             InstanceManager& instanceManager,
-                                            OpacityMicromapManager* opacityMicromapManager,
-                                            float frameTimeMilliseconds) {
+                                            OpacityMicromapManager* opacityMicromapManager) {
     ScopedGpuProfileZone(ctx, "buildBLAS");
 
     auto& instances = instanceManager.getInstanceTable();
@@ -417,6 +440,10 @@ namespace dxvk {
     std::unordered_map<BlasEntry*, std::vector<RtInstance*>> uniqueBlas;
 
     for (RtInstance* instance : instances) {
+      if (instance->isHidden()) {
+        continue;
+      }
+
       // If the instance has zero mask, do not build BLAS for it: no ray can intersect this instance.
       if (instance->getVkInstance().mask == 0) {
         
@@ -452,7 +479,7 @@ namespace dxvk {
       fillGeometryInfoFromBlasEntry(*blasEntry, *instance, opacityMicromapManager);
 
       const uint32_t minPrimsInDynamicBLAS = std::max(RtxOptions::minPrimsInDynamicBLAS(), 100u);
-      const uint32_t maxPrimsForMergedBLAS = RtxOptions::Get()->maxPrimsInMergedBLAS();
+      const uint32_t maxPrimsForMergedBLAS = RtxOptions::maxPrimsInMergedBLAS();
       const uint32_t blasPrims = blasEntry->modifiedGeometryData.calculatePrimitiveCount();
 
       // Figure out if this blas should be a dynamic one
@@ -576,8 +603,15 @@ namespace dxvk {
       // Try to reuse our dynamic BLAS if it exists
       Rc<PooledBlas>& selectedBlas = blasEntry->dynamicBlas;
 
-      const bool build = forceRebuild || !selectedBlas.ptr() || selectedBlas->accelStructure->info().size != sizeInfo.accelerationStructureSize;
-      const bool update = blasEntry->frameLastUpdated == currentFrame;
+      bool build = forceRebuild || !selectedBlas.ptr() || selectedBlas->accelStructure->info().size != sizeInfo.accelerationStructureSize;
+
+      // Validate that the selected blas is compatible with the current build info for update purposes
+      bool update = blasEntry->frameLastUpdated == currentFrame;
+      if (update && !build && !validateUpdateMode(selectedBlas->buildInfo, buildInfo)) {
+        // If an update is requested but the BLAS is not compatible with the current build info then force a rebuild
+        update = false;
+        build = true;
+      }
 
       // There is no such BLAS - create one
       if (build) {
@@ -614,6 +648,8 @@ namespace dxvk {
         // Put the merged BLAS into the build queue
         blasToBuild.push_back(buildInfo);
         blasRangesToBuild.push_back(&blasEntry->buildRanges[0]);
+
+        copyAccelerationStructureBuildGeometryInfo(buildInfo, selectedBlas->buildInfo);
       }
 
       for (RtInstance* rtInstance : pair.second) {
@@ -690,7 +726,7 @@ namespace dxvk {
     }
 
     buildBlases(ctx, execBarriers, cameraManager, opacityMicromapManager, instanceManager, 
-                textures, instances, blasBuckets, blasToBuild, blasRangesToBuild, frameTimeMilliseconds, totalScratchMemory);
+                textures, instances, blasBuckets, blasToBuild, blasRangesToBuild, totalScratchMemory);
   }
 
   void AccelManager::addBlas(RtInstance* instance, BlasEntry* blasEntry, const Matrix4* instanceToObject) {
@@ -713,7 +749,7 @@ namespace dxvk {
       blasInstance.flags ^= VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR;
     }
 
-    if (instance->usesUnorderedApproximations() && RtxOptions::Get()->enableSeparateUnorderedApproximations()) {
+    if (instance->usesUnorderedApproximations() && RtxOptions::enableSeparateUnorderedApproximations()) {
       m_mergedInstances[Tlas::Unordered].push_back(blasInstance);
     } else {
       m_mergedInstances[Tlas::Opaque].push_back(blasInstance);
@@ -739,7 +775,7 @@ namespace dxvk {
       VkAccelerationStructureBuildGeometryInfoKHR buildInfo {};
       buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
       buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-      buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR | additionalAccelerationStructureFlags();
+      buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | additionalAccelerationStructureFlags();
       buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
       buildInfo.geometryCount = bucket->geometries.size();
       buildInfo.pGeometries = bucket->geometries.data();
@@ -763,6 +799,12 @@ namespace dxvk {
         }
       }
 
+      // Must ensure that if we are updating an existing blas, rather than rebuilding, the blas is compatible with our new build info
+      // Cannot update a blas that contains OMM instances, this leads to sporadic device lost errors
+      if (!bucket->hasOmmInstances && selectedBlas && validateUpdateMode(selectedBlas->buildInfo, buildInfo) && selectedBlas->primitiveCounts == bucket->primitiveCounts) {
+        buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+      }
+
       // There is no such BLAS - create one and put it into the pool
       if (!selectedBlas) {
         auto newBlas = createPooledBlas(sizeInfo.accelerationStructureSize, "BLAS Merged");
@@ -776,6 +818,14 @@ namespace dxvk {
 
       // Use the selected BLAS for the build
       buildInfo.dstAccelerationStructure = selectedBlas->accelStructure->getAccelStructure();
+      
+      if (buildInfo.mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR) {
+        // Set the src to the dst if we're updating
+        buildInfo.srcAccelerationStructure = buildInfo.dstAccelerationStructure;
+      }
+
+      copyAccelerationStructureBuildGeometryInfo(buildInfo, selectedBlas->buildInfo);
+      selectedBlas->primitiveCounts = bucket->primitiveCounts;
 
       // Allocate a scratch buffer slice
       const size_t requiredScratchAllocSize = align(sizeInfo.buildScratchSize + m_scratchAlignment, m_scratchAlignment);
@@ -808,7 +858,7 @@ namespace dxvk {
         (bucket->reorderedSurfacesOffset & uint32_t(CUSTOM_INDEX_SURFACE_MASK));
       memcpy(static_cast<void*>(&instance.transform.matrix[0][0]), &identityTransform[0][0], sizeof(VkTransformMatrixKHR));
 
-      if (bucket->usesUnorderedApproximations && RtxOptions::Get()->enableSeparateUnorderedApproximations())
+      if (bucket->usesUnorderedApproximations && RtxOptions::enableSeparateUnorderedApproximations())
         m_mergedInstances[Tlas::Unordered].push_back(instance);
       else
         m_mergedInstances[Tlas::Opaque].push_back(instance);
@@ -835,7 +885,7 @@ namespace dxvk {
     uint32_t numActiveBillboards = 0;
 
     // Check the enablement here - because the instance manager needs to run the billboard analysis all the time
-    if (RtxOptions::Get()->enableBillboardOrientationCorrection()) {
+    if (RtxOptions::enableBillboardOrientationCorrection()) {
       memoryBillboards.resize(instanceManager.getBillboards().size());
       uint32_t index = 0;
 
@@ -1146,7 +1196,6 @@ namespace dxvk {
                                  const std::vector<std::unique_ptr<BlasBucket>>& blasBuckets,
                                  std::vector<VkAccelerationStructureBuildGeometryInfoKHR>& blasToBuild,
                                  std::vector<VkAccelerationStructureBuildRangeInfoKHR*>& blasRangesToBuild,
-                                 float frameTimeMilliseconds,
                                  size_t& totalScratchMemory) {
     ScopedGpuProfileZone(ctx, "buildBLAS");
     // Upload surfaces before opacity micromap generation which reads the surface data on the GPU
@@ -1154,13 +1203,16 @@ namespace dxvk {
 
     // Build and bind opacity micromaps
     if (opacityMicromapManager && opacityMicromapManager->isActive()) {
-      opacityMicromapManager->buildOpacityMicromaps(ctx, textures, cameraManager.getLastCameraCutFrameId(), frameTimeMilliseconds);
+      opacityMicromapManager->buildOpacityMicromaps(ctx, textures, cameraManager.getLastCameraCutFrameId());
 
       // Bind opacity micromaps
       for (auto& blasBucket : blasBuckets) {
         for (uint32_t i = 0; i < blasBucket->geometries.size(); i++) {
-          opacityMicromapManager->tryBindOpacityMicromap(ctx, *blasBucket->originalInstances[i], blasBucket->instanceBillboardIndices[i],
+          auto ommSourceHash = opacityMicromapManager->tryBindOpacityMicromap(ctx, *blasBucket->originalInstances[i], blasBucket->instanceBillboardIndices[i],
                                                          blasBucket->geometries[i], instanceManager);
+          if (ommSourceHash != kEmptyHash) {
+            blasBucket->hasOmmInstances = true;
+          }
         }
       }
 
@@ -1251,7 +1303,7 @@ namespace dxvk {
   void AccelManager::internalBuildTlas(Rc<DxvkContext> ctx, size_t& totalScratchSize) {
     static constexpr const char* names[] = { "TLAS_Opaque", "TLAS_NonOpaque" };
     ScopedGpuProfileZone(ctx, names[type]);
-    const VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR | additionalAccelerationStructureFlags();
+    const VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | additionalAccelerationStructureFlags();
 
     const auto& vkd = m_device->vkd();
 
@@ -1323,5 +1375,62 @@ namespace dxvk {
 
     ctx->getCommandList()->trackResource<DxvkAccess::Write>(tlas.accelStructure);
     ctx->getCommandList()->trackResource<DxvkAccess::Write>(m_scratchBuffer);
+  }
+
+  // Check if the existing build geometry info for this blas is compatible with the new one for the purpose of updating rather than rebuilding
+  bool AccelManager::validateUpdateMode(const VkAccelerationStructureBuildGeometryInfoKHR& oldInfo, const VkAccelerationStructureBuildGeometryInfoKHR& newInfo) {
+    if (!(oldInfo.flags & VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR)) {
+      return false;
+    }
+
+    if (oldInfo.type != newInfo.type || oldInfo.flags != newInfo.flags || oldInfo.geometryCount != newInfo.geometryCount) {
+      return false;
+    }
+
+    for (uint32_t i = 0; i < oldInfo.geometryCount; ++i) {
+      const VkAccelerationStructureGeometryKHR* oldGeom = oldInfo.pGeometries ? &oldInfo.pGeometries[i] : oldInfo.ppGeometries[i];
+      const VkAccelerationStructureGeometryKHR* newGeom = newInfo.pGeometries ? &newInfo.pGeometries[i] : newInfo.ppGeometries[i];
+
+      if (oldGeom->geometryType != newGeom->geometryType || oldGeom->flags != newGeom->flags) {
+        return false;
+      }
+
+      // Per validation layers we need to check attributes of geometry types
+      switch (oldGeom->geometryType) {
+      case VK_GEOMETRY_TYPE_TRIANGLES_KHR:
+      {
+        const auto& oldTriangles = oldGeom->geometry.triangles;
+        const auto& newTriangles = newGeom->geometry.triangles;
+        if (oldTriangles.vertexFormat != newTriangles.vertexFormat ||
+            oldTriangles.indexType != newTriangles.indexType ||
+            oldTriangles.maxVertex != newTriangles.maxVertex ||
+            oldTriangles.vertexStride != newTriangles.vertexStride) {
+          return false;
+        }
+        break;
+      }
+      case VK_GEOMETRY_TYPE_AABBS_KHR:
+      {
+        const auto& oldAabbs = oldGeom->geometry.aabbs;
+        const auto& newAabbs = newGeom->geometry.aabbs;
+        if (oldAabbs.stride != newAabbs.stride) {
+          return false;
+        }
+        break;
+      }
+      case VK_GEOMETRY_TYPE_INSTANCES_KHR:
+      {
+        const auto& oldInstances = oldGeom->geometry.instances;
+        const auto& newInstances = newGeom->geometry.instances;
+        if (oldInstances.arrayOfPointers != newInstances.arrayOfPointers) {
+          return false;
+        }
+        break;
+      }
+      default:
+        return false;
+      }
+    }
+    return true;
   }
 }  // namespace dxvk

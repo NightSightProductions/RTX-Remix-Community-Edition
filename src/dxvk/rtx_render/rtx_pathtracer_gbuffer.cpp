@@ -45,6 +45,7 @@
 #include <rtx_shaders/gbuffer_psr_rayquery_raygen.h>
 #include <rtx_shaders/gbuffer_psr_rayquery_nrc.h>
 #include <rtx_shaders/gbuffer_psr_rayquery_raygen_nrc.h>
+
 #include <rtx_shaders/gbuffer_miss.h>
 #include <rtx_shaders/gbuffer_nrc_miss.h>
 #include <rtx_shaders/gbuffer_psr_miss.h>
@@ -58,6 +59,39 @@
 #include <rtx_shaders/gbuffer_psr_material_rayPortal_closesthit.h>
 #include <rtx_shaders/gbuffer_psr_nrc_material_opaque_translucent_closesthit.h>
 #include <rtx_shaders/gbuffer_psr_nrc_material_rayPortal_closesthit.h>
+
+
+#include <rtx_shaders/gbuffer_raygen_wboit.h>
+#include <rtx_shaders/gbuffer_raygen_nrc_wboit.h>
+#include <rtx_shaders/gbuffer_raygen_ser_wboit.h>
+#include <rtx_shaders/gbuffer_raygen_ser_nrc_wboit.h>
+#include <rtx_shaders/gbuffer_rayquery_wboit.h>
+#include <rtx_shaders/gbuffer_rayquery_nrc_wboit.h>
+#include <rtx_shaders/gbuffer_rayquery_raygen_wboit.h>
+#include <rtx_shaders/gbuffer_rayquery_raygen_nrc_wboit.h>
+#include <rtx_shaders/gbuffer_psr_raygen_wboit.h>
+#include <rtx_shaders/gbuffer_psr_raygen_ser_wboit.h>
+#include <rtx_shaders/gbuffer_psr_raygen_nrc_wboit.h>
+#include <rtx_shaders/gbuffer_psr_raygen_ser_nrc_wboit.h>
+#include <rtx_shaders/gbuffer_psr_rayquery_wboit.h>
+#include <rtx_shaders/gbuffer_psr_rayquery_raygen_wboit.h>
+#include <rtx_shaders/gbuffer_psr_rayquery_nrc_wboit.h>
+#include <rtx_shaders/gbuffer_psr_rayquery_raygen_nrc_wboit.h>
+
+
+#include <rtx_shaders/gbuffer_miss_wboit.h>
+#include <rtx_shaders/gbuffer_nrc_miss_wboit.h>
+#include <rtx_shaders/gbuffer_psr_miss_wboit.h>
+#include <rtx_shaders/gbuffer_psr_nrc_miss_wboit.h>
+
+#include <rtx_shaders/gbuffer_material_opaque_translucent_closesthit_wboit.h>
+#include <rtx_shaders/gbuffer_nrc_material_opaque_translucent_closesthit_wboit.h>
+#include <rtx_shaders/gbuffer_material_rayPortal_closesthit_wboit.h>
+#include <rtx_shaders/gbuffer_nrc_material_rayPortal_closesthit_wboit.h>
+#include <rtx_shaders/gbuffer_psr_material_opaque_translucent_closesthit_wboit.h>
+#include <rtx_shaders/gbuffer_psr_material_rayPortal_closesthit_wboit.h>
+#include <rtx_shaders/gbuffer_psr_nrc_material_opaque_translucent_closesthit_wboit.h>
+#include <rtx_shaders/gbuffer_psr_nrc_material_rayPortal_closesthit_wboit.h>
 
 #include "dxvk_scoped_annotation.h"
 #include "rtx_context.h"
@@ -187,44 +221,50 @@ namespace dxvk {
     const bool isOpacityMicromapSupported = OpacityMicromapManager::checkIsOpacityMicromapSupported(*m_device);
     const bool isShaderExecutionReorderingSupported = 
       RtxContext::checkIsShaderExecutionReorderingSupported(*m_device) && 
-      RtxOptions::Get()->isShaderExecutionReorderingInPathtracerGbufferEnabled();
-    const bool portalsEnabled = RtxOptions::Get()->rayPortalModelTextureHashes().size() > 0;
+      RtxOptions::isShaderExecutionReorderingInPathtracerGbufferEnabled();
+    const bool portalsEnabled = RtxOptions::rayPortalModelTextureHashes().size() > 0;
 
     if (RtxOptions::Shader::prewarmAllVariants()) {
       for (int32_t nrcEnabled = isNrcSupported; nrcEnabled >= 0; nrcEnabled--) {
         for (int32_t isPSRPass = 1; isPSRPass >= 0; isPSRPass--) {
-          for (int32_t includePortals = portalsEnabled; includePortals >= 0; includePortals--) {
-            for (int32_t useRayQuery = 1; useRayQuery >= 0; useRayQuery--) {
-              for (int32_t serEnabled = isShaderExecutionReorderingSupported; serEnabled >= 0; serEnabled--) {
-                for (int32_t ommEnabled = isOpacityMicromapSupported; ommEnabled >= 0; ommEnabled--) {
-                  pipelineManager.registerRaytracingShaders(getPipelineShaders(isPSRPass, useRayQuery, serEnabled, ommEnabled, includePortals, nrcEnabled));
+          for (int32_t wboitEnabled = 1; wboitEnabled >= 0; wboitEnabled--) {
+            for (int32_t includePortals = portalsEnabled; includePortals >= 0; includePortals--) {
+              for (int32_t useRayQuery = 1; useRayQuery >= 0; useRayQuery--) {
+                for (int32_t serEnabled = isShaderExecutionReorderingSupported; serEnabled >= 0; serEnabled--) {
+                  for (int32_t ommEnabled = isOpacityMicromapSupported; ommEnabled >= 0; ommEnabled--) {
+                    pipelineManager.registerRaytracingShaders(getPipelineShaders(isPSRPass, useRayQuery, serEnabled, ommEnabled, includePortals, nrcEnabled, wboitEnabled));
+                  }
                 }
               }
             }
-          }
 
-          getComputeShader(isPSRPass, nrcEnabled);
+            getComputeShader(isPSRPass, nrcEnabled, wboitEnabled);
+          }
         }
       }
     } else {
       // Note: The getters for these SER/OMM enabled flags also check if SER/OMMs are supported, so we do not need to check for that manually.
-      const bool serEnabled = RtxOptions::Get()->isShaderExecutionReorderingInPathtracerGbufferEnabled();
-      const bool ommEnabled = RtxOptions::Get()->getEnableOpacityMicromap();
-      const bool nrcEnabled = RtxOptions::Get()->integrateIndirectMode() == IntegrateIndirectMode::NeuralRadianceCache;
+      const bool serEnabled = RtxOptions::isShaderExecutionReorderingInPathtracerGbufferEnabled();
+      const bool ommEnabled = RtxOptions::getEnableOpacityMicromap();
+      const bool nrcEnabled = RtxOptions::integrateIndirectMode() == IntegrateIndirectMode::NeuralRadianceCache;
+      const bool wboitEnabled = RtxOptions::wboitEnabled();
 
       // Need both PSR and non-PSR passes.
       for (int32_t isPSRPass = 1; isPSRPass >= 0; isPSRPass--) {
         for (int32_t includePortals = portalsEnabled; includePortals >= 0; includePortals--) {
           DxvkComputePipelineShaders shaders;
-          switch (RtxOptions::Get()->getRenderPassGBufferRaytraceMode()) {
+          switch (RtxOptions::renderPassGBufferRaytraceMode()) {
           case RaytraceMode::RayQuery:
-            getComputeShader(isPSRPass, nrcEnabled);
+            getComputeShader(isPSRPass, nrcEnabled, wboitEnabled);
             break;
           case RaytraceMode::RayQueryRayGen:
-            pipelineManager.registerRaytracingShaders(getPipelineShaders(isPSRPass, true, serEnabled, ommEnabled, includePortals, nrcEnabled));
+            pipelineManager.registerRaytracingShaders(getPipelineShaders(isPSRPass, true, serEnabled, ommEnabled, includePortals, nrcEnabled, wboitEnabled));
             break;
           case RaytraceMode::TraceRay:
-            pipelineManager.registerRaytracingShaders(getPipelineShaders(isPSRPass, false, serEnabled, ommEnabled, includePortals, nrcEnabled));
+            pipelineManager.registerRaytracingShaders(getPipelineShaders(isPSRPass, false, serEnabled, ommEnabled, includePortals, nrcEnabled, wboitEnabled));
+            break;
+          case RaytraceMode::Count:
+            assert(false && "Invalid RaytraceMode in DxvkPathtracerGbuffer::prewarmShaders");
             break;
           }
         }
@@ -236,6 +276,7 @@ namespace dxvk {
     RtxContext* ctx, 
     const Resources::RaytracingOutput& rtOutput) {
     ScopedGpuProfileZone(ctx, "Gbuffer Raytracing");
+    ctx->setFramePassStage(RtxFramePassStage::GBufferPrimaryRays);
 
     // Bind resources
 
@@ -271,7 +312,7 @@ namespace dxvk {
     ctx->bindResourceView(GBUFFER_BINDING_SHARED_MEDIUM_MATERIAL_INDEX_OUTPUT, rtOutput.m_sharedMediumMaterialIndex.view, nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_SHARED_BIAS_CURRENT_COLOR_MASK_OUTPUT, rtOutput.m_sharedBiasCurrentColorMask.view(Resources::AccessType::Write), nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_SHARED_TEXTURE_COORD_OUTPUT, rtOutput.m_sharedTextureCoord.view, nullptr);
-    ctx->bindResourceView(GBUFFER_BINDING_SHARED_SURFACE_INDEX_OUTPUT, rtOutput.m_sharedSurfaceIndex.view, nullptr);
+    ctx->bindResourceView(GBUFFER_BINDING_SHARED_SURFACE_INDEX_OUTPUT, rtOutput.m_sharedSurfaceIndex.view(Resources::AccessType::Write), nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_SHARED_SUBSURFACE_DATA_OUTPUT, rtOutput.m_sharedSubsurfaceData.view, nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_SHARED_SUBSURFACE_DIFFUSION_PROFILE_DATA_OUTPUT, rtOutput.m_sharedSubsurfaceDiffusionProfileData.view, nullptr);
 
@@ -282,10 +323,10 @@ namespace dxvk {
     ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_LINEAR_VIEW_Z_OUTPUT, rtOutput.m_primaryLinearViewZ.view, nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_ALBEDO_OUTPUT, rtOutput.m_primaryAlbedo.view, nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_BASE_REFLECTIVITY_OUTPUT, rtOutput.m_primaryBaseReflectivity.view(Resources::AccessType::Write), nullptr);
-    ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_VIRTUAL_MVEC_OUTPUT, rtOutput.m_primaryVirtualMotionVector.view, nullptr);
+    ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_VIRTUAL_MVEC_OUTPUT, rtOutput.m_primaryVirtualMotionVector.view(Resources::AccessType::Write), nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_SCREEN_SPACE_MOTION_OUTPUT, rtOutput.m_primaryScreenSpaceMotionVector.view, nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_VIRTUAL_WORLD_SHADING_NORMAL_OUTPUT, rtOutput.m_primaryVirtualWorldShadingNormalPerceptualRoughness.view, nullptr);
-    ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_VIRTUAL_WORLD_SHADING_NORMAL_DENOISING_OUTPUT, rtOutput.m_primaryVirtualWorldShadingNormalPerceptualRoughnessDenoising.view, nullptr);
+    ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_VIRTUAL_WORLD_SHADING_NORMAL_DENOISING_OUTPUT, rtOutput.m_primaryVirtualWorldShadingNormalPerceptualRoughnessDenoising.view(Resources::AccessType::Write), nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_HIT_DISTANCE_OUTPUT, rtOutput.m_primaryHitDistance.view, nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_VIEW_DIRECTION_OUTPUT, rtOutput.m_primaryViewDirection.view, nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_CONE_RADIUS_OUTPUT, rtOutput.m_primaryConeRadius.view, nullptr);
@@ -326,8 +367,8 @@ namespace dxvk {
 
     // Bind necessary buffers for DLSS-RR. 
     // Note: RR uses different PSR rules compared to other uses, and its resolves are resolved in an another shader.
-    ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_DEPTH_DLSSRR_OUTPUT, rtOutput.m_primaryDepthDLSSRR.view, nullptr);
-    ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_NORMAL_DLSSRR_OUTPUT, rtOutput.m_primaryWorldShadingNormalDLSSRR.view, nullptr);
+    ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_DEPTH_DLSSRR_OUTPUT, rtOutput.m_primaryDepthDLSSRR.view(Resources::AccessType::Write), nullptr);
+    ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_NORMAL_DLSSRR_OUTPUT, rtOutput.m_primaryWorldShadingNormalDLSSRR.view(Resources::AccessType::Write), nullptr);
     ctx->bindResourceView(GBUFFER_BINDING_PRIMARY_SCREEN_SPACE_MOTION_DLSSRR_OUTPUT, rtOutput.m_primaryScreenSpaceMotionVectorDLSSRR.view, nullptr);
 
     // Bind necessary resources for Neural Radiance Cache
@@ -337,21 +378,23 @@ namespace dxvk {
     const VkExtent3D& rayDims = rtOutput.m_compositeOutputExtent;
 
     const bool nrcEnabled = nrc.isActive();
-    const bool serEnabled = RtxOptions::Get()->isShaderExecutionReorderingInPathtracerGbufferEnabled();
-    const bool ommEnabled = RtxOptions::Get()->getEnableOpacityMicromap();
-    const bool includePortals = RtxOptions::Get()->rayPortalModelTextureHashes().size() > 0 || rtOutput.m_raytraceArgs.numActiveRayPortals > 0;
+    const bool serEnabled = RtxOptions::isShaderExecutionReorderingInPathtracerGbufferEnabled();
+    const bool ommEnabled = RtxOptions::getEnableOpacityMicromap();
+    const bool includePortals = RtxOptions::rayPortalModelTextureHashes().size() > 0 || rtOutput.m_raytraceArgs.numActiveRayPortals > 0;
+    const bool wboitEnabled = RtxOptions::wboitEnabled();
 
     GbufferPushConstants pushArgs = {};
     pushArgs.isTransmissionPSR = 0;
     ctx->setPushConstantBank(DxvkPushConstantBank::RTX);
     ctx->pushConstants(0, sizeof(pushArgs), &pushArgs);
 
-    switch (RtxOptions::Get()->getRenderPassGBufferRaytraceMode()) {
+
+    switch (RtxOptions::renderPassGBufferRaytraceMode()) {
     case RaytraceMode::RayQuery:
       VkExtent3D workgroups = util::computeBlockCount(rayDims, VkExtent3D { 16, 8, 1 });
       {
         ScopedGpuProfileZone(ctx, "Primary Rays");
-        ctx->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, getComputeShader(false, nrcEnabled));
+        ctx->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, getComputeShader(false, nrcEnabled, wboitEnabled));
         ctx->dispatch(workgroups.width, workgroups.height, workgroups.depth);
       }
 
@@ -359,12 +402,14 @@ namespace dxvk {
         // Warning: do not change the order of Reflection and Transmission PSR, that will break
         // PSR data dependencies due to resource aliasing.
         ScopedGpuProfileZone(ctx, "Reflection PSR");
-        ctx->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, getComputeShader(true, nrcEnabled));
+        ctx->setFramePassStage(RtxFramePassStage::ReflectionPSR);
+        ctx->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, getComputeShader(true, nrcEnabled, wboitEnabled));
         ctx->dispatch(workgroups.width, workgroups.height, workgroups.depth);
       }
 
       {
         ScopedGpuProfileZone(ctx, "Transmission PSR");
+        ctx->setFramePassStage(RtxFramePassStage::TransmissionPSR);
         pushArgs.isTransmissionPSR = 1;
         ctx->pushConstants(0, sizeof(pushArgs), &pushArgs);
         ctx->dispatch(workgroups.width, workgroups.height, workgroups.depth);
@@ -374,7 +419,7 @@ namespace dxvk {
       case RaytraceMode::RayQueryRayGen:
       {
         ScopedGpuProfileZone(ctx, "Primary Rays");
-        ctx->bindRaytracingPipelineShaders(getPipelineShaders(false, true, serEnabled, ommEnabled, includePortals, nrcEnabled));
+        ctx->bindRaytracingPipelineShaders(getPipelineShaders(false, true, serEnabled, ommEnabled, includePortals, nrcEnabled, wboitEnabled));
         ctx->traceRays(rayDims.width, rayDims.height, rayDims.depth);
       }
 
@@ -382,12 +427,14 @@ namespace dxvk {
         // Warning: do not change the order of Reflection and Transmission PSR, that will break
         // PSR data dependencies due to resource aliasing.
         ScopedGpuProfileZone(ctx, "Reflection PSR");
-        ctx->bindRaytracingPipelineShaders(getPipelineShaders(true, true, serEnabled, ommEnabled, includePortals, nrcEnabled));
+        ctx->setFramePassStage(RtxFramePassStage::ReflectionPSR);
+        ctx->bindRaytracingPipelineShaders(getPipelineShaders(true, true, serEnabled, ommEnabled, includePortals, nrcEnabled, wboitEnabled));
         ctx->traceRays(rayDims.width, rayDims.height, rayDims.depth);
       }
 
       {
         ScopedGpuProfileZone(ctx, "Transmission PSR");
+        ctx->setFramePassStage(RtxFramePassStage::TransmissionPSR);
         pushArgs.isTransmissionPSR = 1;
         ctx->pushConstants(0, sizeof(pushArgs), &pushArgs);
         ctx->traceRays(rayDims.width, rayDims.height, rayDims.depth);
@@ -397,7 +444,7 @@ namespace dxvk {
       case RaytraceMode::TraceRay:
       {
         ScopedGpuProfileZone(ctx, "Primary Rays");
-        ctx->bindRaytracingPipelineShaders(getPipelineShaders(false, false, serEnabled, ommEnabled, includePortals, nrcEnabled));
+        ctx->bindRaytracingPipelineShaders(getPipelineShaders(false, false, serEnabled, ommEnabled, includePortals, nrcEnabled, wboitEnabled));
         ctx->traceRays(rayDims.width, rayDims.height, rayDims.depth);
       }
 
@@ -405,16 +452,21 @@ namespace dxvk {
         // Warning: do not change the order of Reflection and Transmission PSR, that will break
         // PSR data dependencies due to resource aliasing.
         ScopedGpuProfileZone(ctx, "Reflection PSR");
-        ctx->bindRaytracingPipelineShaders(getPipelineShaders(true, false, serEnabled, ommEnabled, includePortals, nrcEnabled));
+        ctx->setFramePassStage(RtxFramePassStage::ReflectionPSR);
+        ctx->bindRaytracingPipelineShaders(getPipelineShaders(true, false, serEnabled, ommEnabled, includePortals, nrcEnabled, wboitEnabled));
         ctx->traceRays(rayDims.width, rayDims.height, rayDims.depth);
       }
 
       {
         ScopedGpuProfileZone(ctx, "Transmission PSR");
+        ctx->setFramePassStage(RtxFramePassStage::TransmissionPSR);
         pushArgs.isTransmissionPSR = 1;
         ctx->pushConstants(0, sizeof(pushArgs), &pushArgs);
         ctx->traceRays(rayDims.width, rayDims.height, rayDims.depth);
       }
+      break;
+      case RaytraceMode::Count:
+        assert(false && "Invalid RaytraceMode in DxvkPathtracerGbuffer::dispatch");
       break;
     }
   }
@@ -425,103 +477,199 @@ namespace dxvk {
     const bool serEnabled,
     const bool ommEnabled,
     const bool includePortals,
-    const bool nrcEnabled) {
+    const bool nrcEnabled,
+    const bool wboitEnabled) {
   ScopedCpuProfileZone();
     DxvkRaytracingPipelineShaders shaders;
     if (useRayQuery) {
-      if (isPSRPass) {
-        if (nrcEnabled) {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_rayquery_raygen_nrc));
+      if (wboitEnabled) {
+        if (isPSRPass) {
+          if (nrcEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_rayquery_raygen_nrc_wboit));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_rayquery_raygen_wboit));
+          }
+
+          shaders.debugName = "GBuffer PSR RayQuery (RGS)";
         } else {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_rayquery_raygen));
+          if (nrcEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_rayquery_raygen_nrc_wboit));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_rayquery_raygen_wboit));
+          }
+          shaders.debugName = "GBuffer RayQuery (RGS)";
         }
-        
-        shaders.debugName = "GBuffer PSR RayQuery (RGS)";
-      }
-      else {
-        if (nrcEnabled) {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_rayquery_raygen_nrc));
+      } else {
+        if (isPSRPass) {
+          if (nrcEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_rayquery_raygen_nrc));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_rayquery_raygen));
+          }
+
+          shaders.debugName = "GBuffer PSR RayQuery (RGS)";
         } else {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_rayquery_raygen));
+          if (nrcEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_rayquery_raygen_nrc));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_rayquery_raygen));
+          }
+          shaders.debugName = "GBuffer RayQuery (RGS)";
         }
-        shaders.debugName = "GBuffer RayQuery (RGS)";
       }
     } else {  // TraceRay
 
       // PSR RayGen
       if (isPSRPass) {
-        if (nrcEnabled) {
-          if (serEnabled) {
-            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_ser_nrc));
+        if (wboitEnabled) {
+          if (nrcEnabled) {
+            if (serEnabled) {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_ser_nrc_wboit));
+            } else {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_nrc_wboit));
+            }
           } else {
-            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_nrc));
+            if (serEnabled) {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_ser_wboit));
+            } else {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_wboit));
+            }
+          }
+
+          // Miss
+          if (nrcEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_psr_nrc_miss_wboit));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_psr_miss_wboit));
+          }
+
+          // HitGroup
+          if (nrcEnabled) {
+            if (includePortals) {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_nrc_material_rayportal_closestHit_wboit), nullptr, nullptr);
+            } else {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_nrc_material_opaque_translucent_closestHit_wboit), nullptr, nullptr);
+            }
+          } else {
+            if (includePortals) {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_material_rayportal_closestHit_wboit), nullptr, nullptr);
+            } else {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_material_opaque_translucent_closestHit_wboit), nullptr, nullptr);
+            }
           }
         } else {
-          if (serEnabled) {
-            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_ser));
+          if (nrcEnabled) {
+            if (serEnabled) {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_ser_nrc));
+            } else {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_nrc));
+            }
           } else {
-            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen));
+            if (serEnabled) {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen_ser));
+            } else {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_psr_raygen));
+            }
+          }
+
+          // Miss
+          if (nrcEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_psr_nrc_miss));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_psr_miss));
+          }
+
+          // HitGroup
+          if (nrcEnabled) {
+            if (includePortals) {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_nrc_material_rayportal_closestHit), nullptr, nullptr);
+            } else {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_nrc_material_opaque_translucent_closestHit), nullptr, nullptr);
+            }
+          } else {
+            if (includePortals) {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_material_rayportal_closestHit), nullptr, nullptr);
+            } else {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_material_opaque_translucent_closestHit), nullptr, nullptr);
+            }
           }
         }
-
-        // Miss
-        if (nrcEnabled) {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_psr_nrc_miss));
-        } else {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_psr_miss));
-        }
-
-        // HitGroup
-        if (nrcEnabled) {
-          if (includePortals) {
-            shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_nrc_material_rayportal_closestHit), nullptr, nullptr);
-          } else {
-            shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_nrc_material_opaque_translucent_closestHit), nullptr, nullptr);
-          }
-        } else {
-          if (includePortals) {
-            shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_material_rayportal_closestHit), nullptr, nullptr);
-          } else {
-            shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_psr_material_opaque_translucent_closestHit), nullptr, nullptr);
-          }
-        }
-
         shaders.debugName = "GBuffer PSR TraceRay (RGS)";
 
       } else {  // RayGen
-        if (nrcEnabled) {
-          if (serEnabled) {
-            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_ser_nrc));
-          } else {
-            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_nrc));
-          }
-        } else {
-          if (serEnabled) {
-            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_ser));
-          } else {
-            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen));
-          }
-        }
 
-        // Miss
-        if (nrcEnabled) {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_nrc_miss));
-        } else {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_miss));
-        }
 
-        // HitGroup
-        if (nrcEnabled) {
-          if (includePortals) {
-            shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_nrc_material_rayportal_closestHit), nullptr, nullptr);
+        if (wboitEnabled) {
+          if (nrcEnabled) {
+            if (serEnabled) {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_ser_nrc_wboit));
+            } else {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_nrc_wboit));
+            }
           } else {
-            shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_nrc_material_opaque_translucent_closestHit), nullptr, nullptr);
+            if (serEnabled) {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_ser_wboit));
+            } else {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_wboit));
+            }
           }
-        } else {
-          if (includePortals) {
-            shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_material_rayportal_closestHit), nullptr, nullptr);
+
+          // Miss
+          if (nrcEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_nrc_miss_wboit));
           } else {
-            shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_material_opaque_translucent_closestHit), nullptr, nullptr);
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_miss_wboit));
+          }
+
+          // HitGroup
+          if (nrcEnabled) {
+            if (includePortals) {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_nrc_material_rayportal_closestHit_wboit), nullptr, nullptr);
+            } else {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_nrc_material_opaque_translucent_closestHit_wboit), nullptr, nullptr);
+            }
+          } else {
+            if (includePortals) {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_material_rayportal_closestHit_wboit), nullptr, nullptr);
+            } else {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_material_opaque_translucent_closestHit_wboit), nullptr, nullptr);
+            }
+        }
+        } else {
+          if (nrcEnabled) {
+            if (serEnabled) {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_ser_nrc));
+            } else {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_nrc));
+            }
+          } else {
+            if (serEnabled) {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen_ser));
+            } else {
+              shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, GbufferRayGenShader, gbuffer_raygen));
+            }
+          }
+
+          // Miss
+          if (nrcEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_nrc_miss));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_MISS_BIT_KHR, GbufferMissShader, gbuffer_miss));
+          }
+
+          // HitGroup
+          if (nrcEnabled) {
+            if (includePortals) {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_nrc_material_rayportal_closestHit), nullptr, nullptr);
+            } else {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_nrc_material_opaque_translucent_closestHit), nullptr, nullptr);
+            }
+          } else {
+            if (includePortals) {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_material_rayportal_closestHit), nullptr, nullptr);
+            } else {
+              shaders.addHitGroup(GET_SHADER_VARIANT(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, GbufferClosestHitShader, gbuffer_material_opaque_translucent_closestHit), nullptr, nullptr);
+            }
           }
         }
 
@@ -538,18 +686,35 @@ namespace dxvk {
 
   Rc<DxvkShader> DxvkPathtracerGbuffer::getComputeShader(
     const bool isPSRPass,
-    const bool nrcEnabled) const {
-    if (nrcEnabled) {
-      if (isPSRPass) {
-        return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_psr_rayquery_nrc);
+    const bool nrcEnabled, 
+    const bool wboitEnabled) const {
+    if (wboitEnabled) {
+      if (nrcEnabled) {
+        if (isPSRPass) {
+          return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_psr_rayquery_nrc_wboit);
+        } else {
+          return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_rayquery_nrc_wboit);
+        }
       } else {
-        return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_rayquery_nrc);
+        if (isPSRPass) {
+          return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_psr_rayquery_wboit);
+        } else {
+          return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_rayquery_wboit);
+        }
       }
     } else {
-      if (isPSRPass) {
-        return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_psr_rayquery);
+      if (nrcEnabled) {
+        if (isPSRPass) {
+          return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_psr_rayquery_nrc);
+        } else {
+          return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_rayquery_nrc);
+        }
       } else {
-        return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_rayquery);
+        if (isPSRPass) {
+          return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_psr_rayquery);
+        } else {
+          return GET_SHADER_VARIANT(VK_SHADER_STAGE_COMPUTE_BIT, GbufferRayGenShader, gbuffer_rayquery);
+        }
       }
     }
   }

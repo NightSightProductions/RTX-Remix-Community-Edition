@@ -222,54 +222,54 @@ namespace dxvk {
 
   void DxvkReSTIRGIRayQuery::setToNRDPreset() {
     // Less aggressive boiling filter to keep more samples
-    boilingFilterMinThresholdRef() = 10.0f;
-    boilingFilterMaxThresholdRef() = 20.0f;
-    historyDiscardStrengthRef() = 0.0f;
-    boilingFilterRemoveReservoirThresholdRef() = 62.f;
+    boilingFilterMinThreshold.setDeferred(10.0f);
+    boilingFilterMaxThreshold.setDeferred(20.0f);
+    historyDiscardStrength.setDeferred(0.0f);
+    boilingFilterRemoveReservoirThreshold.setDeferred(62.f);
 
     // Weaken specular light at corners to reduce noise
-    useVirtualSampleRef() = true;
-    virtualSampleMaxDistanceRatioRef() = 0.0f;
+    useVirtualSample.setDeferred(true);
+    virtualSampleMaxDistanceRatio.setDeferred(0.0f);
 
     // Improve performance when stealing samples
-    stealBoundaryPixelSamplesWhenOutsideOfScreenRef() = true;
-    useSampleStealingRef() = ReSTIRGISampleStealing::StealPixel;
-    sampleStealingJitterRef() = 0.0f;
+    stealBoundaryPixelSamplesWhenOutsideOfScreen.setDeferred(true);
+    useSampleStealing.setDeferred(ReSTIRGISampleStealing::StealPixel);
+    sampleStealingJitter.setDeferred(0.0f);
 
     // No special handling to object movement
-    validateVisibilityChangeRef() = false;
+    validateVisibilityChange.setDeferred(false);
 
     // Legacy temporal reprojection
-    useDLSSRRCompatibilityModeRef() = false;
+    useDLSSRRCompatibilityMode.setDeferred(false);
   }
 
   void DxvkReSTIRGIRayQuery::setToRayReconstructionPreset() {
     // More aggressive boiling filter to reduce sample coherency
-    boilingFilterMinThresholdRef() = 15.0f;
-    boilingFilterMaxThresholdRef() = 20.0f;
-    historyDiscardStrengthRef() = 10.0f;
-    boilingFilterRemoveReservoirThresholdRef() = 30.f;
+    boilingFilterMinThreshold.setDeferred(15.0f);
+    boilingFilterMaxThreshold.setDeferred(20.0f);
+    historyDiscardStrength.setDeferred(10.0f);
+    boilingFilterRemoveReservoirThreshold.setDeferred(30.f);
 
     // Preserve more specular light details at corners
-    useVirtualSampleRef() = false;
-    virtualSampleMaxDistanceRatioRef() = 0.5f;
+    useVirtualSample.setDeferred(false);
+    virtualSampleMaxDistanceRatio.setDeferred(0.5f);
 
     // Better specular light during camera movement
-    useReflectionReprojectionRef() = true;
+    useReflectionReprojection.setDeferred(true);
 
     // More stable signal
-    useAdaptiveTemporalHistoryRef() = false;
+    useAdaptiveTemporalHistory.setDeferred(false);
 
     // Reduce sample coherency and improve sample quality when stealing samples 
-    stealBoundaryPixelSamplesWhenOutsideOfScreenRef() = true;
-    useSampleStealingRef() = ReSTIRGISampleStealing::StealSample;
-    sampleStealingJitterRef() = 3.0;
+    stealBoundaryPixelSamplesWhenOutsideOfScreen.setDeferred(true);
+    useSampleStealing.setDeferred(ReSTIRGISampleStealing::StealSample);
+    sampleStealingJitter.setDeferred(3.0);
 
     // More responsive to object movement
-    validateVisibilityChangeRef() = true;
+    validateVisibilityChange.setDeferred(true);
 
     // Randomize temporal reprojection to reduce coherency
-    useDLSSRRCompatibilityModeRef() = true;
+    useDLSSRRCompatibilityMode.setDeferred(true);
   }
 
   void DxvkReSTIRGIRayQuery::bindIntegrateIndirectPathTracingResources(RtxContext& ctx) {
@@ -303,7 +303,7 @@ namespace dxvk {
   }
 
   bool DxvkReSTIRGIRayQuery::isEnabled() const {
-    return RtxOptions::Get()->useReSTIRGI();
+    return RtxOptions::useReSTIRGI();
   }
 
   void DxvkReSTIRGIRayQuery::createDownscaledResource(
@@ -356,6 +356,7 @@ namespace dxvk {
 
     {
       ScopedGpuProfileZone(ctx, "ReSTIR GI Temporal Reuse");
+      ctx->setFramePassStage(RtxFramePassStage::ReSTIR_GI_TemporalReuse);
 
       // Inputs
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_WORLD_SHADING_NORMAL_INPUT, rtOutput.m_primaryWorldShadingNormal.view, nullptr);
@@ -367,11 +368,11 @@ namespace dxvk {
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_PREV_WORLD_POSITION_INPUT, rtOutput.getPreviousPrimaryWorldPositionWorldTriangleNormal().view(Resources::AccessType::Read, rtOutput.getPreviousPrimaryWorldPositionWorldTriangleNormal().matchesWriteFrameIdx(frameIdx - 1)), nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_VIEW_DIRECTION_INPUT, rtOutput.m_primaryViewDirection.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_CONE_RADIUS_INPUT, rtOutput.m_primaryConeRadius.view, nullptr);
-      ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_MVEC_INPUT, rtOutput.m_primaryVirtualMotionVector.view, nullptr);
+      ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_MVEC_INPUT, rtOutput.m_primaryVirtualMotionVector.view(Resources::AccessType::Read), nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_RADIANCE_INPUT, m_restirGIRadiance.view(Resources::AccessType::Read), nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_HIT_GEOMETRY_INPUT, m_restirGIHitGeometry.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_POSITION_ERROR_INPUT, rtOutput.m_primaryPositionError.view, nullptr);
-      ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SHARED_SURFACE_INDEX_INPUT, rtOutput.m_sharedSurfaceIndex.view, nullptr);
+      ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SHARED_SURFACE_INDEX_INPUT, rtOutput.m_sharedSurfaceIndex.view(Resources::AccessType::Read), nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SUBSURFACE_DATA_INPUT, rtOutput.m_sharedSubsurfaceData.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SUBSURFACE_DIFFUSION_PROFILE_DATA_INPUT, rtOutput.m_sharedSubsurfaceDiffusionProfileData.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SHARED_FLAGS_INPUT, rtOutput.m_sharedFlags.view, nullptr);
@@ -387,6 +388,7 @@ namespace dxvk {
 
     {
       ScopedGpuProfileZone(ctx, "ReSTIR GI Spatial Reuse");
+      ctx->setFramePassStage(RtxFramePassStage::ReSTIR_GI_SpatialReuse);
 
       // Inputs
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_WORLD_SHADING_NORMAL_INPUT, rtOutput.m_primaryWorldShadingNormal.view, nullptr);
@@ -398,11 +400,11 @@ namespace dxvk {
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_PREV_WORLD_POSITION_INPUT, rtOutput.getPreviousPrimaryWorldPositionWorldTriangleNormal().view(Resources::AccessType::Read, rtOutput.getPreviousPrimaryWorldPositionWorldTriangleNormal().matchesWriteFrameIdx(frameIdx - 1)), nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_VIEW_DIRECTION_INPUT, rtOutput.m_primaryViewDirection.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_CONE_RADIUS_INPUT, rtOutput.m_primaryConeRadius.view, nullptr);
-      ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_MVEC_INPUT, rtOutput.m_primaryVirtualMotionVector.view, nullptr);
+      ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_MVEC_INPUT, rtOutput.m_primaryVirtualMotionVector.view(Resources::AccessType::Read), nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_RADIANCE_INPUT, m_restirGIRadiance.view(Resources::AccessType::Read), nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_HIT_GEOMETRY_INPUT, m_restirGIHitGeometry.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_POSITION_ERROR_INPUT, rtOutput.m_primaryPositionError.view, nullptr);
-      ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SHARED_SURFACE_INDEX_INPUT, rtOutput.m_sharedSurfaceIndex.view, nullptr);
+      ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SHARED_SURFACE_INDEX_INPUT, rtOutput.m_sharedSurfaceIndex.view(Resources::AccessType::Read), nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SUBSURFACE_DATA_INPUT, rtOutput.m_sharedSubsurfaceData.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SUBSURFACE_DIFFUSION_PROFILE_DATA_INPUT, rtOutput.m_sharedSubsurfaceDiffusionProfileData.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_REUSE_BINDING_SHARED_FLAGS_INPUT, rtOutput.m_sharedFlags.view, nullptr);
@@ -419,13 +421,14 @@ namespace dxvk {
     workgroups = util::computeBlockCount(numRaysExtent, VkExtent3D { 8, 8, 1 });
     {
       ScopedGpuProfileZone(ctx, "ReSTIR GI Final Shading");
+      ctx->setFramePassStage(RtxFramePassStage::ReSTIR_GI_FinalShading);
       ctx->bindCommonRayTracingResources(rtOutput);
 
       ctx->bindResourceView(RESTIR_GI_FINAL_SHADING_BINDING_SHARED_FLAGS_INPUT, rtOutput.m_sharedFlags.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_FINAL_SHADING_BINDING_SHARED_MATERIAL_DATA0_INPUT, rtOutput.m_sharedMaterialData0.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_FINAL_SHADING_BINDING_SHARED_MATERIAL_DATA1_INPUT, rtOutput.m_sharedMaterialData1.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_FINAL_SHADING_BINDING_SHARED_TEXTURE_COORD_INPUT, rtOutput.m_sharedTextureCoord.view, nullptr);
-      ctx->bindResourceView(RESTIR_GI_FINAL_SHADING_BINDING_SHARED_SURFACE_INDEX_INPUT, rtOutput.m_sharedSurfaceIndex.view, nullptr);
+      ctx->bindResourceView(RESTIR_GI_FINAL_SHADING_BINDING_SHARED_SURFACE_INDEX_INPUT, rtOutput.m_sharedSurfaceIndex.view(Resources::AccessType::Read), nullptr);
       ctx->bindResourceView(RESTIR_GI_FINAL_SHADING_BINDING_SHARED_SUBSURFACE_DATA_INPUT, rtOutput.m_sharedSubsurfaceData.view, nullptr);
       ctx->bindResourceView(RESTIR_GI_FINAL_SHADING_BINDING_SHARED_SUBSURFACE_DIFFUSION_PROFILE_DATA_INPUT, rtOutput.m_sharedSubsurfaceDiffusionProfileData.view, nullptr);
 

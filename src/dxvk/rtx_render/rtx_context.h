@@ -66,7 +66,6 @@ namespace dxvk {
     RtxContext(const Rc<DxvkDevice>& device);
     ~RtxContext();
 
-    float getWallTimeSinceLastCall();
     float getGpuIdleTimeSinceLastCall();
 
     /**
@@ -126,9 +125,10 @@ namespace dxvk {
 
     void bindCommonRayTracingResources(const Resources::RaytracingOutput& rtOutput);
 
+    void bindResourceView(const uint32_t slot, const Rc<DxvkImageView>& imageView, const Rc<DxvkBufferView>& bufferView);
+
     void getDenoiseArgs(NrdArgs& outPrimaryDirectNrdArgs, NrdArgs& outPrimaryIndirectNrdArgs, NrdArgs& outSecondaryNrdArgs);
-    void updateRaytraceArgsConstantBuffer(Resources::RaytracingOutput& rtOutput, float frameTimeMilliseconds,
-                                          const VkExtent3D& downscaledExtent, const VkExtent3D& targetExtent);
+    void updateRaytraceArgsConstantBuffer(Resources::RaytracingOutput& rtOutput, const VkExtent3D& downscaledExtent, const VkExtent3D& targetExtent);
 
     D3D9RtxVertexCaptureData& allocAndMapVertexCaptureConstantBuffer();
     D3D9FixedFunctionVS& allocAndMapFixedFunctionVSConstantBuffer();
@@ -140,6 +140,20 @@ namespace dxvk {
     void setSpecConstantsInfo(VkPipelineBindPoint pipeline, const DxvkScInfo& newSpecConstantInfo);
 
     bool useRayReconstruction() const;
+
+#ifdef REMIX_DEVELOPMENT
+    // Note: Cache image views for all resources that used by current frame, so we can do query for resource aliasing at the end of frame.
+    //       This is automatically called when binding resources for passes, RtxContext::bindCommonRayTracingResources
+    //       When we are not using the binding function in the passes such as DLSSRR, we need to manually cache the image views. Please reference the cache logic in DxvkRayReconstruction::dispatch
+    void cacheResourceAliasingImageView(const Rc<DxvkImageView>& imageView);
+#endif
+
+    inline void setFramePassStage(const RtxFramePassStage currentFramePassStage) {
+#ifdef REMIX_DEVELOPMENT
+      m_currentPassStage = currentFramePassStage;
+#endif
+    }
+
   protected:
     virtual void updateComputeShaderResources() override;
     virtual void updateRaytracingShaderResources() override;
@@ -152,6 +166,7 @@ namespace dxvk {
       DLSS,
       NIS,
       TAAU,
+      XeSS,
       DLSS_RR,
     };
 
@@ -165,27 +180,28 @@ namespace dxvk {
 
     VkExtent3D setDownscaleExtent(const VkExtent3D& upscaleExtent);
 
-    VkExtent3D onFrameBegin(const VkExtent3D& upscaleExtent, float frameTimeMilliseconds);
+    VkExtent3D onFrameBegin(const VkExtent3D& upscaleExtent);
 
     void dispatchVolumetrics(const Resources::RaytracingOutput& rtOutput);
     void dispatchIntegrate(const Resources::RaytracingOutput& rtOutput);
     void dispatchPathTracing(const Resources::RaytracingOutput& rtOutput);
     void dispatchDemodulate(const Resources::RaytracingOutput& rtOutput);
     void dispatchNeeCache(const Resources::RaytracingOutput& rtOutput);
-    void dispatchDLSS(const Resources::RaytracingOutput& rtOutput, float frameTimeMilliseconds);
-    void dispatchRayReconstruction(const Resources::RaytracingOutput& rtOutput, float frameTimeMilliseconds);
-    void dispatchDenoise(const Resources::RaytracingOutput& rtOutput, float frameTimeMilliseconds);
+    void dispatchDLSS(const Resources::RaytracingOutput& rtOutput);
+    void dispatchRayReconstruction(const Resources::RaytracingOutput& rtOutput);
+    void dispatchDenoise(const Resources::RaytracingOutput& rtOutput);
     void dispatchComposite(const Resources::RaytracingOutput& rtOutput);
     void dispatchReplaceCompositeWithDebugView(const Resources::RaytracingOutput& rtOutput);
     void dispatchNIS(const Resources::RaytracingOutput& rtOutput);
+    void dispatchXeSS(const Resources::RaytracingOutput& rtOutput);
     void dispatchTemporalAA(const Resources::RaytracingOutput& rtOutput);
-    void dispatchToneMapping(const Resources::RaytracingOutput& rtOutput, bool performSRGBConversion, const float frameTimeMilliseconds);
+    void dispatchToneMapping(const Resources::RaytracingOutput& rtOutput, bool performSRGBConversion);
     void dispatchBloom(const Resources::RaytracingOutput& rtOutput);
     void dispatchPostFx(Resources::RaytracingOutput& rtOutput);
     void dispatchDebugView(Rc<DxvkImage>& srcImage, const Resources::RaytracingOutput& rtOutput, bool captureScreenImage);
     void dispatchObjectPicking(Resources::RaytracingOutput& rtOutput, const VkExtent3D& srcExtent, const VkExtent3D& targetExtent);
     void dispatchDLFG();
-    void updateMetrics(const float frameTimeMilliseconds, const float gpuIdleTimeMilliseconds) const;
+    void updateMetrics(const float gpuIdleTimeMilliseconds) const;
 
     void rasterizeToSkyMatte(const DrawParameters& params, const DrawCallState& drawCallState);
     void initSkyProbe();
@@ -218,7 +234,8 @@ namespace dxvk {
     bool shouldUseRayReconstruction() const;
     bool shouldUseNIS() const;
     bool shouldUseTAA() const;
-    bool shouldUseUpscaler() const { return shouldUseDLSS() || shouldUseNIS() || shouldUseTAA(); }
+    bool shouldUseXeSS() const;
+    bool shouldUseUpscaler() const { return shouldUseDLSS() || shouldUseNIS() || shouldUseTAA() || shouldUseXeSS(); }
 
     inline static bool s_triggerScreenshot = false;
     inline static bool s_triggerUsdCapture = false;
@@ -250,5 +267,24 @@ namespace dxvk {
     } m_objectPickingReadback {};
 
     std::vector<DrawCallState> m_delayedRayTracedSky;
+
+#ifdef REMIX_DEVELOPMENT
+    void queryAvailableResourceAliasing();
+    void clearResourceAliasingCache();
+    void analyzeResourceAliasing();
+
+    struct ResourceCache {
+      Rc<DxvkImageView> view;
+      RtxFramePassStage beginPassStage = RtxFramePassStage::FrameBegin;
+      RtxFramePassStage endPassStage = RtxFramePassStage::FrameEnd;
+      std::unordered_set<std::string> names;
+    };
+
+    // We only have 5 types of format categories and we won't expect this will exceed 10 in near future. So we hard code the category to 10 types for better performance and easier development.
+    std::vector<ResourceCache> m_resourceCacheTable[static_cast<uint32_t>(RtxTextureFormatCompatibilityCategory::Count)];
+    std::unordered_map<const DxvkImageView*, std::string> m_viewMap;
+
+    RtxFramePassStage m_currentPassStage = RtxFramePassStage::FrameBegin;
+#endif
   };
 } // namespace dxvk

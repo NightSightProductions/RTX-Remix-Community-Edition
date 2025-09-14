@@ -197,7 +197,7 @@ struct RaytraceArgs {
   // Half the angle of the cone spawned by each pixel to use for ray cone texture filtering.
   float screenSpacePixelSpreadHalfAngle;
   uint debugView;
-  float vertexColorStrength;
+  float primaryDirectMissLinearViewZ;
 
 
   vec4 debugKnob;     // For temporary tuning in shaders, has a dedicated UI widget.
@@ -205,12 +205,14 @@ struct RaytraceArgs {
   // Values to use on a ray miss
   vec3 clearColorNormal;
   float clearColorDepth;
-  uint32_t clearColorPicking;
-  uint enableDLSSRR;
 
   float2 upscaleFactor;   // Displayed(upscaled) / RT resolution
+  uint32_t clearColorPicking;
 
-  float primaryDirectMissLinearViewZ;
+  uint enableDLSSRR;
+  uint setLogValueForDisocclusionMaskForDLSSRR;
+
+  // NOTE: Variables need to be in groups of 4x32 bits above this comment.
 
   uint uniformRandomNumber;
   uint16_t opaqueDiffuseLobeSamplingProbabilityZeroThreshold;
@@ -227,7 +229,7 @@ struct RaytraceArgs {
   uint16_t translucentTransmissionLobeSamplingProbabilityZeroThreshold;
   uint16_t minTranslucentTransmissionLobeSamplingProbability;
   float roughnessDemodulationOffset;
-  uint timeSinceStartMS;
+  float timeSinceStartSeconds;
   
   uint enableCalculateVirtualShadingNormals;
   uint enableDirectLighting;
@@ -378,5 +380,13 @@ struct RaytraceArgs {
   // hence why it is not named enableNrcTraining here
   uint allowNrcTraining;
 
+  float vertexColorStrength;
+  uint pad0;
+
+  float wboitEnergyLossCompensation;
+  float wboitDepthWeightTuning;
+  uint wboitEnabled;
+
   // NOTE: Add structs to the top section of RaytraceArgs, not the bottom.
+  // NOTE: bool does not work in debug builds, use uint instead.
 };

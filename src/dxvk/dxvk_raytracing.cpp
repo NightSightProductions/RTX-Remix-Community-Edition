@@ -26,7 +26,7 @@ namespace dxvk {
     bool shouldApply(const Rc<DxvkDevice>& device) {
       static int result = 0;
 
-      if (!RtxOptions::Get()->getEnableOpacityMicromap()) {
+      if (!RtxOptions::getEnableOpacityMicromap()) {
         // Disable the WAR when OMM is not enabled
         return false;
       }
@@ -317,7 +317,7 @@ namespace dxvk {
 
     VkDeferredOperationKHR deferredOp = VK_NULL_HANDLE;
 
-    if (m_useDeferredOperations.getValue()) {
+    if (useDeferredOperations()) {
       VK_THROW_IF_FAILED(m_vkd->vkCreateDeferredOperationKHR(m_vkd->device(), VK_NULL_HANDLE, &deferredOp));
     }
 
