@@ -387,6 +387,32 @@ remixapi_ErrorCode REMIXAPI_CALL remixapi_SetConfigVariable(const char* var, con
   return REMIXAPI_ERROR_CODE_SUCCESS;
 }
 
+remixapi_ErrorCode REMIXAPI_CALL remixapi_AddTextureHash(const char* var, const char* value) {
+  ASSERT_REMIXAPI_PFN_TYPE(remixapi_AddTextureHash);
+  if (!var || !value) {
+    return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
+  }
+  {
+    ClientMessage c(Commands::RemixApi_AddTextureHash);
+    send(c, var);
+    send(c, value);
+  }
+  return REMIXAPI_ERROR_CODE_SUCCESS;
+}
+
+remixapi_ErrorCode REMIXAPI_CALL remixapi_RemoveTextureHash(const char* var, const char* value) {
+  ASSERT_REMIXAPI_PFN_TYPE(remixapi_RemoveTextureHash);
+  if (!var || !value) {
+    return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
+  }
+  {
+    ClientMessage c(Commands::RemixApi_RemoveTextureHash);
+    send(c, var);
+    send(c, value);
+  }
+  return REMIXAPI_ERROR_CODE_SUCCESS;
+}
+
 remixapi_ErrorCode REMIXAPI_CALL remixapi_dxvk_CreateD3D9(
   remixapi_Bool       editorModeEnabled,
   IDirect3D9Ex**      out_pD3D9) {
@@ -441,6 +467,8 @@ extern "C" {
       interf.CreateMaterial = remixapi_CreateMaterial;
       interf.DestroyMaterial = remixapi_DestroyMaterial;
       interf.CreateMesh = remixapi_CreateMesh;
+      interf.AddTextureHash = remixapi_AddTextureHash;
+      interf.RemoveTextureHash = remixapi_RemoveTextureHash;
       interf.DestroyMesh = remixapi_DestroyMesh;
       // interf.SetupCamera = remixapi_SetupCamera;
       interf.DrawInstance = remixapi_DrawInstance;
