@@ -177,6 +177,8 @@ dxvk_src = files([
   'rtx_render/rtx.h',
   'rtx_render/rtx_accel_manager.cpp',
   'rtx_render/rtx_accel_manager.h',
+  'rtx_render/rtx_accumulation.cpp',
+  'rtx_render/rtx_accumulation.h',
   'rtx_render/rtx_asset_data.h',
   'rtx_render/rtx_asset_data_manager.cpp',
   'rtx_render/rtx_asset_data_manager.h',
@@ -211,6 +213,8 @@ dxvk_src = files([
   'rtx_render/rtx_dlfg.h',
   'rtx_render/rtx_dlss.cpp', 
   'rtx_render/rtx_dlss.h',
+  'rtx_render/rtx_xess.cpp',
+  'rtx_render/rtx_xess.h',
   'rtx_render/rtx_draw_call_cache.cpp',
   'rtx_render/rtx_draw_call_cache.h',
   'rtx_render/rtx_env.cpp',
@@ -327,6 +331,28 @@ dxvk_src = files([
   'rtx_render/rtx_dust_particles.cpp',
   'rtx_render/rtx_dust_particles.h',
 
+  'rtx_render/rtx_system_info.cpp',
+  'rtx_render/rtx_system_info.h',
+  
+  'rtx_render/rtx_particle_system.cpp',
+  'rtx_render/rtx_particle_system.h',
+
+  'rtx_render/graph/rtx_component_list.h',
+  'rtx_render/graph/rtx_graph_batch.cpp',
+  'rtx_render/graph/rtx_graph_batch.h',
+  'rtx_render/graph/rtx_graph_component_macros.h',
+  'rtx_render/graph/rtx_graph_instance.cpp',
+  'rtx_render/graph/rtx_graph_instance.h',
+  'rtx_render/graph/rtx_graph_manager.h',
+  'rtx_render/graph/rtx_graph_ogn_writer.cpp',
+  'rtx_render/graph/rtx_graph_ogn_writer.h',
+  'rtx_render/graph/rtx_graph_md_writer.cpp',
+  'rtx_render/graph/rtx_graph_md_writer.h',
+  'rtx_render/graph/rtx_graph_types.cpp',
+  'rtx_render/graph/rtx_graph_types.h',
+  'rtx_render/graph/rtx_graph_usd_parser.cpp',
+  'rtx_render/graph/rtx_graph_usd_parser.h',
+
   'rtx_render/rtx_constants.h',
 
   'platform/dxvk_win32_exts.cpp',
@@ -371,11 +397,6 @@ dxvk_src = files([
   'imgui/implot_items.cpp',
 ])
 
-nrc_include_dir = include_directories(join_paths('../../', 'submodules/nrc/include'))
-nrc_dep = declare_dependency(
-  include_directories : nrc_include_dir
-)
-
 thread_dep = dependency('threads')
 
 nrd_include_dir = include_directories(join_paths('../../', 'external/nrd/Include'))
@@ -398,38 +419,29 @@ dlss_dep = declare_dependency(
   include_directories : [ dlss_include_dir, dlfg_include_dir ]
 )
 
-nrc_include_path = include_directories(join_paths('../../', 'submodules/nrc/include'))
+# XeSS dependency - using direct library path
+xess_lib_path = join_paths(global_src_root_norm, 'submodules/xess/lib')
+xess_lib = cc.find_library('libxess', dirs : xess_lib_path, required : false)
+xess_dep = declare_dependency(dependencies : [ xess_lib ])
+
 nrc_dll_path = join_paths(meson.global_source_root(), 'submodules/nrc/bin/')
 nrc_lib_path = join_paths(meson.global_source_root(), 'submodules/nrc/lib/')
 nrc_lib = dxvk_compiler.find_library('NRC_Vulkan', dirs : nrc_lib_path, required : true)
 
 nrc_dep = declare_dependency(
-  dependencies : [ nrc_lib ],
-  include_directories : nrc_include_path
+  dependencies : [ nrc_lib ]
+)
+
+submodules_dep = declare_dependency(
+  include_directories : include_directories('../../submodules')
 )
 
 generated_dxvk_shaders = glsl_generator.process(dxvk_shaders)
-
-rtx_shaders_command = [ python_interpreter, shader_compile_script,
-    '-glslang', glsl_compiler,
-    '-slangc', slang_compiler,
-    '-input', '@CURRENT_SOURCE_DIR@/shaders/rtx',
-    '-include', '@CURRENT_SOURCE_DIR@/shaders',
-    '-include', rtxdi_include_path_string,
-    '-include', volumetrics_include_path_string,
-    '-include', rtxcr_include_path_string,
-    '-output', '@OUTDIR@/rtx_shaders',
-    '-parallel' ]
-
-if get_option('buildtype').startswith('debug')
-  rtx_shaders_command += [ '-debug' ]
-endif
-
 rtx_shaders = custom_target(
   'rtx_shaders',
   build_by_default: true,
   output: ['_built_shaders.txt'],
-  command: rtx_shaders_command
+  command: [ python_interpreter ] + rtx_shaders_command_arguments
 )
 
 dxvk_embedded_data_files = files([
@@ -439,7 +451,7 @@ dxvk_embedded_data_files = files([
 
 dxvk_generated_embedded_files = embedding_compiler.process(dxvk_embedded_data_files)
 
-dxvk_deps = [ thread_dep, vkcommon_dep, dxvk_extradep, usd_dep, lssUsd_dep, nrc_dep, nrd_dep, dlss_dep, tracy_dep, tracy_dep_dynamic, aftermath_dep, nvapi_dep, reflex_dep ]
+dxvk_deps = [ thread_dep, vkcommon_dep, dxvk_extradep, usd_dep, lssUsd_dep, nrc_dep, nrd_dep, dlss_dep, submodules_dep, xess_dep, tracy_dep, tracy_dep_dynamic, aftermath_dep, nvapi_dep, reflex_dep ]
 
 if enable_rtxio
   dxvk_deps += rtxio_dep
@@ -447,15 +459,21 @@ endif
 
 if not dxvk_is_msvc
 	ws2_32_dep = declare_dependency(
-		dependencies : [ lib_ws2_32 ])
+		dependencies : [ lib_ws2_32])
 	dxvk_deps += ws2_32_dep
 endif
 
+delayimp_dep = declare_dependency(
+	dependencies : [ lib_delayimp])
+dxvk_deps += delayimp_dep
+
 dxvk_lib = static_library('dxvk', dxvk_src, dxvk_version, [generated_dxvk_shaders, rtx_shaders, dxvk_generated_embedded_files],
-  link_with           : [ util_lib, spirv_lib ], 
+  link_with           : [ util_lib, spirv_lib, usd_plugins ], 
   dependencies        : [ dxvk_deps ],
-  include_directories : [ dxvk_include_path, dxvk_shader_include_path, rtxdi_include_path, remix_api_include_path, rtxcr_include_path ],
-  override_options    : ['cpp_std='+dxvk_cpp_std])
+  include_directories : [ dxvk_include_path, dxvk_shader_include_path, rtxdi_include_path, remix_api_include_path, rtxcr_include_path, submodules_include_path  ],
+  override_options    : ['cpp_std='+dxvk_cpp_std],
+  # Force switch statements over enums to either cover all cases or have a default case.
+  cpp_args            : dxvk_is_msvc ? ['/we4062'] : ['-Wswitch'])
 
 dxvk_dep = declare_dependency(
   link_with           : [ dxvk_lib ],

@@ -85,6 +85,8 @@ namespace dxvk {
     case DLSSProfile::Balanced: perfQuality = NVSDK_NGX_PerfQuality_Value_Balanced; break;
     case DLSSProfile::MaxQuality: perfQuality = NVSDK_NGX_PerfQuality_Value_MaxQuality; break;
     case DLSSProfile::FullResolution: perfQuality = NVSDK_NGX_PerfQuality_Value_MaxQuality; break; // Need to set MaxQ as some modes dont support full res
+    case DLSSProfile::Auto: break; // Allowed case with no action needed.
+    case DLSSProfile::Invalid: assert(false && "DLSSProfile::Invalid passed to DxvkDLSS::profileToQuality"); break;
     }
     return perfQuality;
   }
@@ -94,7 +96,7 @@ namespace dxvk {
   }
 
   bool DxvkDLSS::isEnabled() const {
-      return RtxOptions::Get()->isDLSSOrRayReconstructionEnabled();
+      return RtxOptions::isDLSSOrRayReconstructionEnabled();
   }
 
   DLSSProfile DxvkDLSS::getAutoProfile(uint32_t displayWidth, uint32_t displayHeight) {
@@ -112,10 +114,10 @@ namespace dxvk {
       desiredProfile = DLSSProfile::UltraPerf;
     }
 
-    if (RtxOptions::Get()->graphicsPreset() == GraphicsPreset::Medium) {
+    if (RtxOptions::graphicsPreset() == GraphicsPreset::Medium) {
       // When using medium preset, bias DLSS more towards performance
       desiredProfile = (DLSSProfile)std::max(0, (int) desiredProfile - 1);
-    } else if (RtxOptions::Get()->graphicsPreset() == GraphicsPreset::Low) {
+    } else if (RtxOptions::graphicsPreset() == GraphicsPreset::Low) {
       // When using low preset, give me all the perf I can get!!!
       desiredProfile = (DLSSProfile) std::max(0, (int) desiredProfile - 2);
     }
@@ -200,6 +202,7 @@ namespace dxvk {
     bool resetHistory)
   {
     ScopedGpuProfileZone(ctx, "DLSS");
+    ctx->setFramePassStage(RtxFramePassStage::DLSS);
 
     bool dlssAutoExposure = useDlssAutoExposure();
     mRecreate |= (mAutoExposure != dlssAutoExposure);

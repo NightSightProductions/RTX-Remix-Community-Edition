@@ -27,7 +27,7 @@
 // Inputs
 
 layout(push_constant)
-ConstantBuffer<ParticleSystemConstants> particleCb;
+ConstantBuffer<DustParticleSystemConstants> particleCb;
 
 layout(binding = DUST_PARTICLES_BINDING_FILTERED_RADIANCE_Y_INPUT)
 Sampler3D<float4> FilteredAccumulatedRadianceY;
@@ -41,4 +41,4 @@ Sampler2D<float> PrimaryDepth;
 // Outputs
 
 layout(binding = DUST_PARTICLES_BINDING_PARTICLES_BUFFER_INOUT)
-RWStructuredBuffer<GpuParticle> Particles;
+RWStructuredBuffer<GpuDustParticle> Particles;

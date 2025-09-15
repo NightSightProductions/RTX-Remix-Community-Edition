@@ -226,7 +226,7 @@ float16_t getRayPortalTransparency(
       surface.spriteSheetCols = portal.spriteSheetCols;
       surface.spriteSheetFPS = portal.spriteSheetFPS;
 
-      SurfaceInteraction surfaceInteraction = (SurfaceInteraction)0;
+      SurfaceInteraction surfaceInteraction = SurfaceInteraction();
       surfaceInteraction.textureCoordinates = uv * 0.5f + 0.5f;
       surfaceInteraction.textureGradientX = vec2(0.0f);
       surfaceInteraction.textureGradientY = vec2(0.0f);
@@ -512,7 +512,7 @@ VisibilityResult traceVisibilityRay<let VisibilityMode : uint>(
   VisibilityResult result = traceVisibilityRay<VisibilityMode>(visibilityRay, rayMask, expectedRayPortalIndex, rayOriginPortalSpace, hasRayOriginatedFromViewModel, usePreviousTLAS, clearOpaqueHitAttenuation);
 
   // We want to calculate the attenuation from the light to the surface - which is why we use targetPosition (light) and neg-direction (light to surface)
-  result.attenuation *= calcAtmosphereAttenuation(cb.volumeArgs, false, result.hitDistance, targetPosition, -visibilityRay.direction);
+  result.attenuation *= calcVolumetricAttenuation(cb.volumeArgs, none, false, result.hitDistance, targetPosition, -visibilityRay.direction);
 
 #ifdef OPAQUE_MATERIAL_USE_POM
   result.attenuation = result.attenuation * pomAttenuation;

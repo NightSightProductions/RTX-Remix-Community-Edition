@@ -180,6 +180,10 @@ namespace dxvk
         return m_view->type();
       }
 
+      const bool empty() const {
+        return m_sharedResource == nullptr || m_view == nullptr;
+      }
+
     private:
       void takeOwnership() const;
 
@@ -234,7 +238,7 @@ namespace dxvk
       Resource m_sharedMaterialData1;
       Resource m_sharedMediumMaterialIndex;
       AliasedResource m_sharedBiasCurrentColorMask;
-      Resource m_sharedSurfaceIndex;
+      AliasedResource m_sharedSurfaceIndex;
       Resource m_sharedSubsurfaceData;
       Resource m_sharedSubsurfaceDiffusionProfileData;
 
@@ -248,20 +252,21 @@ namespace dxvk
       Resource m_primaryAlbedo;
       AliasedResource m_primaryBaseReflectivity;
       AliasedResource m_primarySpecularAlbedo;
-      Resource m_primaryVirtualMotionVector;
+      AliasedResource m_primaryVirtualMotionVector;
       ResourceQueue m_primaryScreenSpaceMotionVectorQueue;
       Resource m_primaryScreenSpaceMotionVector;
       Resource m_primaryVirtualWorldShadingNormalPerceptualRoughness;
-      Resource m_primaryVirtualWorldShadingNormalPerceptualRoughnessDenoising;
+      AliasedResource m_primaryVirtualWorldShadingNormalPerceptualRoughnessDenoising;
       Resource m_primaryHitDistance;
       Resource m_primaryViewDirection;
       Resource m_primaryConeRadius;
       AliasedResource m_primaryWorldPositionWorldTriangleNormal[2];
       Resource m_primaryPositionError;
       AliasedResource m_primaryRtxdiIlluminance[2];
-      Resource m_primaryRtxdiTemporalPosition;
+      AliasedResource m_primaryRtxdiTemporalPosition;
       Resource m_primarySurfaceFlags;
-      Resource m_primaryDisocclusionThresholdMix; // for NRD
+      Resource m_primaryDisocclusionThresholdMix;
+      AliasedResource m_primaryDisocclusionMaskForRR;
       Resource m_primaryObjectPicking;
 
       Resource m_secondaryAttenuation;
@@ -302,8 +307,8 @@ namespace dxvk
       AliasedResource m_gbufferPSRData[7];
 
       // DLSSRR data
-      Resource m_primaryDepthDLSSRR;
-      Resource m_primaryWorldShadingNormalDLSSRR;
+      AliasedResource m_primaryDepthDLSSRR;
+      AliasedResource m_primaryWorldShadingNormalDLSSRR;
       Resource m_primaryScreenSpaceMotionVectorDLSSRR;
 
       Resource m_bsdfFactor;
@@ -373,7 +378,7 @@ namespace dxvk
     }
 
     // Message function called at the beginning of the frame, usually allocate or release resources based on each pass's status
-    void onFrameBegin(Rc<DxvkContext> ctx, RtxTextureManager& textureManager, const VkExtent3D& downscaledExtent, const VkExtent3D& targetExtent, float frameTimeMilliseconds, bool resetHistory, bool isCameraCut);
+    void onFrameBegin(Rc<DxvkContext> ctx, RtxTextureManager& textureManager, const SceneManager& sceneManager, const VkExtent3D& downscaledExtent, const VkExtent3D& targetExtent, bool resetHistory, bool isCameraCut);
 
     // Message function called when target or downscaled resolution is changed
     void onResize(Rc<DxvkContext> ctx, const VkExtent3D& downscaledExtents, const VkExtent3D& upscaledExtents);
@@ -399,6 +404,17 @@ namespace dxvk
     Rc<DxvkSampler> getSampler(const VkFilter filter, const VkSamplerMipmapMode mipFilter, 
                                const VkSamplerAddressMode addrMode, 
                                const float mipBias = 0, const bool useAnisotropy = false);
+    
+    // XeSS: Get sampler with automatic XeSS-specific mip bias calculation
+    Rc<DxvkSampler> getSamplerWithXeSSMipBias(const VkFilter filter, const VkSamplerMipmapMode mipFilter,
+                                               const VkSamplerAddressMode addressModeU,
+                                               const VkSamplerAddressMode addressModeV,
+                                               const VkSamplerAddressMode addressModeW,
+                                               const VkClearColorValue borderColor = VkClearColorValue(),
+                                               const float additionalMipBias = 0, const bool useAnisotropy = false);
+    Rc<DxvkSampler> getSamplerWithXeSSMipBias(const VkFilter filter, const VkSamplerMipmapMode mipFilter, 
+                                               const VkSamplerAddressMode addrMode, 
+                                               const float additionalMipBias = 0, const bool useAnisotropy = false);
 
     Tlas& getTLAS(Tlas::Type type) { return m_tlas[type]; }
 
@@ -413,8 +429,7 @@ namespace dxvk
     const VkExtent3D& getTargetDimensions() const { return m_targetExtent; }
     const VkExtent3D& getDownscaleDimensions() const { return m_downscaledExtent; }
 
-    static const uint32_t kInvalidFormatCompatibilityCategoryIndex = UINT32_MAX;
-    static uint32_t getFormatCompatibilityCategoryIndex(const VkFormat format);
+    static RtxTextureFormatCompatibilityCategory getFormatCompatibilityCategory(const VkFormat format);
     static bool areFormatsCompatible(const VkFormat format1, const VkFormat format2);
     static Rc<DxvkImageView> createImageView(Rc<DxvkContext>& ctx, const Rc<DxvkImage>& image, const VkFormat format,
                                              const uint32_t numLayers, const VkImageViewType imageViewType, 
@@ -424,6 +439,15 @@ namespace dxvk
                                         const VkImageViewType imageViewType = VK_IMAGE_VIEW_TYPE_2D,
                                         const VkImageCreateFlags imageCreateFlags = 0, const VkImageUsageFlags extraUsageFlags = VK_IMAGE_USAGE_STORAGE_BIT,
                                         const VkClearColorValue clearValue = { 0.0f, 0.0f, 0.0f, 0.0f }, const uint32_t mipLevels = 1);
+
+#ifdef REMIX_DEVELOPMENT
+    static std::unordered_map<const DxvkImageView*, std::string> s_resourcesViewMap;
+    static std::unordered_set<const DxvkImageView*> s_dynamicAliasingResourcesSet;
+    static bool s_queryAliasing;
+    static std::string s_resourceAliasingQueryText;
+    static bool s_startAliasingAnalyzer;
+    static std::string s_aliasingAnalyzerResultText;
+#endif
 
   private:
     Resources(Resources const&) = delete;

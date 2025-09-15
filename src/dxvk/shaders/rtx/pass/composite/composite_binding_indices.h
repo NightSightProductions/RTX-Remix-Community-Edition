@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2022-2023, NVIDIA CORPORATION. All rights reserved.
+* Copyright (c) 2022-2025, NVIDIA CORPORATION. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -59,12 +59,13 @@
 
 // Inputs/Outputs                                                   
 #define COMPOSITE_PRIMARY_ALBEDO_INPUT_OUTPUT                       30
+#define COMPOSITE_ACCUMULATED_FINAL_OUTPUT_INPUT_OUTPUT             31
 
 // Outputs                                                          
 
-#define COMPOSITE_FINAL_OUTPUT                                      31
-#define COMPOSITE_LAST_FINAL_OUTPUT                                 32
-#define COMPOSITE_ALPHA_BLEND_RADIANCE_OUTPUT                       33
+#define COMPOSITE_FINAL_OUTPUT                                      51
+#define COMPOSITE_LAST_FINAL_OUTPUT                                 52
+#define COMPOSITE_ALPHA_BLEND_RADIANCE_OUTPUT                       53
 
-#define COMPOSITE_RAY_RECONSTRUCTION_PARTICLE_BUFFER_OUTPUT         34
-#define COMPOSITE_DEBUG_VIEW_OUTPUT                                 35
+#define COMPOSITE_RAY_RECONSTRUCTION_PARTICLE_BUFFER_OUTPUT         54
+#define COMPOSITE_DEBUG_VIEW_OUTPUT                                 55

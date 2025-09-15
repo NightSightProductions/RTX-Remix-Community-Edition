@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+* Copyright (c) 2024-2025, NVIDIA CORPORATION. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -21,12 +21,21 @@
 */
 #pragma once
 
+// This disables the warning about uninitialized variables in the following 
+// pattern used in NRC
+// NrcStruct NrcCreateStruct()
+// {
+//    NrcStruct s;
+//    return s;
+// }
+#pragma warning(disable: 41016)
+
 // Includes NRC headers
 
 #include "rtx/external/NRC.h"
 #include "rtx/pass/nrc_args.h"
 
-#include "../../../submodules/nrc/include/NRC.hlsli"
+#include "nrc/include/NRC.hlsli"
 
 // Evaluates an expression only when NRC is enabled and returns its output
 // Returns true when NRC is disabled

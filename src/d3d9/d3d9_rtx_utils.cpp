@@ -153,7 +153,7 @@ namespace dxvk {
     const bool hasPositionT = d3d9State.vertexDecl != nullptr && d3d9State.vertexDecl->TestFlag(D3D9VertexDeclFlag::HasPositionT);
     const bool hasColor0 = d3d9State.vertexDecl != nullptr && d3d9State.vertexDecl->TestFlag(D3D9VertexDeclFlag::HasColor0);
     const bool hasColor1 = d3d9State.vertexDecl != nullptr && d3d9State.vertexDecl->TestFlag(D3D9VertexDeclFlag::HasColor1);
-    const bool lighting = d3d9State.renderStates[D3DRS_LIGHTING] != 0 && !hasPositionT;
+    const bool lighting = d3d9State.renderStates[D3DRS_LIGHTING] != 0 && !hasPositionT; // FFP lighting on only if not positionT
 
     uint32_t diffuseSource = hasColor0 ? D3DMCS_COLOR1 : D3DMCS_MATERIAL;
     uint32_t specularSource = hasColor1 ? D3DMCS_COLOR2 : D3DMCS_MATERIAL;
@@ -174,43 +174,85 @@ namespace dxvk {
 
     materialData.tFactor = d3d9State.renderStates[D3DRS_TEXTUREFACTOR];
 
-    materialData.alphaBlendEnabled = d3d9State.renderStates[D3DRS_ALPHABLENDENABLE] != FALSE;
+materialData.alphaBlendEnabled = d3d9State.renderStates[D3DRS_ALPHABLENDENABLE] != FALSE;
 
-    // usage of unused Renderstates - unused values are set to 0xfefefefe
-    materialData.remixTextureCategoryFlagsFromD3D = d3d9State.renderStates[42] != 0xfefefefe ? d3d9State.renderStates[42] : 0u;
-    materialData.emissiveColorConstantFromD3D = d3d9State.renderStates[149] != 0xfefefefe ? bit::cast<float>(d3d9State.renderStates[149]) : -1.0f;
+// Keep the custom render state handling from game/p2
+// usage of unused Renderstates - unused values are set to 0xfefefefe
+materialData.remixTextureCategoryFlagsFromD3D = d3d9State.renderStates[42] != 0xfefefefe ? d3d9State.renderStates[42] : 0u;
+materialData.emissiveColorConstantFromD3D = d3d9State.renderStates[149] != 0xfefefefe ? bit::cast<float>(d3d9State.renderStates[149]) : -1.0f;
+if (d3d9State.renderStates[150] != 0 && d3d9State.renderStates[150] != 0xfefefefe) {
+  materialData.setHashOverride(d3d9State.renderStates[150]);
+}
 
-    if (d3d9State.renderStates[150] != 0 && d3d9State.renderStates[150] != 0xfefefefe) {
-      materialData.setHashOverride(d3d9State.renderStates[150]);
+if (materialData.alphaBlendEnabled) {
+  D3D9BlendState color;
+  color.Src = D3DBLEND(d3d9State.renderStates[D3DRS_SRCBLEND]);
+  color.Dst = D3DBLEND(d3d9State.renderStates[D3DRS_DESTBLEND]);
+  color.Op = D3DBLENDOP(d3d9State.renderStates[D3DRS_BLENDOP]);
+  FixupBlendState(color);
+  
+  // Add separate alpha blend support from p2-rtx branch
+  D3D9BlendState alpha = color;
+  if (d3d9State.renderStates[D3DRS_SEPARATEALPHABLENDENABLE]) {
+    alpha.Src = D3DBLEND(d3d9State.renderStates[D3DRS_SRCBLENDALPHA]);
+    alpha.Dst = D3DBLEND(d3d9State.renderStates[D3DRS_DESTBLENDALPHA]);
+    alpha.Op = D3DBLENDOP(d3d9State.renderStates[D3DRS_BLENDOPALPHA]);
+    FixupBlendState(alpha);
+  }
+  
+  materialData.srcColorBlendFactor = DecodeBlendFactor(color.Src, false);
+  materialData.dstColorBlendFactor = DecodeBlendFactor(color.Dst, false);
+  materialData.colorBlendOp = DecodeBlendOp(color.Op);
+  
+  // Keep the alpha swizzle handling from game/p2
+  auto NormalizeFactor = [alphaSwizzle](VkBlendFactor Factor) {
+    if (alphaSwizzle) {
+      if (Factor == VK_BLEND_FACTOR_DST_ALPHA)
+        return VK_BLEND_FACTOR_ONE;
+      else if (Factor == VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA)
+        return VK_BLEND_FACTOR_ZERO;
+    }
+    return Factor;
+  };
+  materialData.srcColorBlendFactor = NormalizeFactor(materialData.srcColorBlendFactor);
+  materialData.dstColorBlendFactor = NormalizeFactor(materialData.dstColorBlendFactor);
+  
+  // You'll need to add similar processing for alpha blend factors if needed
+}
     }
 
-    if (materialData.alphaBlendEnabled) {
-      D3D9BlendState color;
-      color.Src = D3DBLEND(d3d9State.renderStates[D3DRS_SRCBLEND]);
-      color.Dst = D3DBLEND(d3d9State.renderStates[D3DRS_DESTBLEND]);
-      color.Op = D3DBLENDOP(d3d9State.renderStates[D3DRS_BLENDOP]);
-      FixupBlendState(color);
+    m.colorSrcFactor = DecodeBlendFactor(color.Src, false);
+    m.colorDstFactor = DecodeBlendFactor(color.Dst, false);
+    m.colorBlendOp = DecodeBlendOp(color.Op);
 
-      materialData.srcColorBlendFactor = DecodeBlendFactor(color.Src, false);
-      materialData.dstColorBlendFactor = DecodeBlendFactor(color.Dst, false);
-      materialData.colorBlendOp = DecodeBlendOp(color.Op);
+    m.alphaSrcFactor = DecodeBlendFactor(alpha.Src, true);
+    m.alphaDstFactor = DecodeBlendFactor(alpha.Dst, true);
+    m.alphaBlendOp = DecodeBlendOp(alpha.Op);
 
-      auto NormalizeFactor = [alphaSwizzle](VkBlendFactor Factor) {
-        if (alphaSwizzle) {
-          if (Factor == VK_BLEND_FACTOR_DST_ALPHA)
-            return VK_BLEND_FACTOR_ONE;
-          else if (Factor == VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA)
-            return VK_BLEND_FACTOR_ZERO;
+    m.writeMask = d3d9State.renderStates[ColorWriteIndex(0)];
+
+    auto NormalizeFactor = [alphaSwizzle](VkBlendFactor f) {
+      if (alphaSwizzle) {
+        if (f == VK_BLEND_FACTOR_DST_ALPHA) {
+          return VK_BLEND_FACTOR_ONE;
         }
-
-        return Factor;
-      };
-      materialData.srcColorBlendFactor = NormalizeFactor(materialData.srcColorBlendFactor);
-      materialData.dstColorBlendFactor = NormalizeFactor(materialData.dstColorBlendFactor);
-    }
+        if (f == VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA) {
+          return VK_BLEND_FACTOR_ZERO;
+        }
+      }
+      return f;
+    };
+    m.colorSrcFactor = NormalizeFactor(m.colorSrcFactor);
+    m.colorDstFactor = NormalizeFactor(m.colorDstFactor);
+    m.alphaSrcFactor = NormalizeFactor(m.alphaSrcFactor);
+    m.alphaDstFactor = NormalizeFactor(m.alphaDstFactor);
 
     materialData.d3dMaterial = d3d9State.material;
+
+    // Allow the users to configure vertex color as baked lighting for legacy draw calls.
+    materialData.isVertexColorBakedLighting = RtxOptions::vertexColorIsBakedLighting();
   }
+
 
   void setFogState(D3D9DeviceEx* pDevice, FogState& fogState) {
     const Direct3DState9& d3d9State = *pDevice->GetRawState();

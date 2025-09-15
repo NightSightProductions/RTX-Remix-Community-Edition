@@ -40,8 +40,8 @@
 
 namespace dxvk {
   struct LightManagerGuiSettings {
-    RW_RTX_OPTION_FLAG("rtx.lights", bool, enableDebugMode, false, RtxOptionFlags::NoSave, "Enables light debug visualization.");
-    RW_RTX_OPTION_FLAG("rtx.lights", bool, debugDrawLightHashes, false, RtxOptionFlags::NoSave, "Draw light hashes of all visible ob screen lights, when enableDebugMode=true.");
+    RTX_OPTION_FLAG("rtx.lights", bool, enableDebugMode, false, RtxOptionFlags::NoSave, "Enables light debug visualization.");
+    RTX_OPTION_FLAG("rtx.lights", bool, debugDrawLightHashes, false, RtxOptionFlags::NoSave, "Draw light hashes of all visible ob screen lights, when enableDebugMode=true.");
   };
 
   ImGui::ComboWithKey<LightManager::FallbackLightMode> fallbackLightModeCombo {
@@ -153,7 +153,6 @@ namespace dxvk {
         } else if (fallbackLightType() == FallbackLightType::Sphere) {
           lightSettingsDirty |= ImGui::DragFloat("Fallback Light Radius", &fallbackLightRadiusObject(), 0.01f, 0.0f, FLT_MAX, "%.3f", ImGuiSliderFlags_AlwaysClamp);
           lightSettingsDirty |= ImGui::DragFloat3("Fallback Light Position Offset", &fallbackLightPositionOffsetObject(), 0.1f, 0.0f, 0.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-          ImGui::SetTooltipToLastWidgetOnHover(fallbackLightPositionOffsetDescription());
 
           lightSettingsDirty |= ImGui::Checkbox("Enable Fallback Light Shaping", &enableFallbackLightShapingObject());
 
@@ -161,7 +160,6 @@ namespace dxvk {
             ImGui::Indent();
 
             lightSettingsDirty |= ImGui::Checkbox("Fallback Light Match View Axis", &enableFallbackLightViewPrimaryAxisObject());
-            ImGui::SetTooltipToLastWidgetOnHover(enableFallbackLightViewPrimaryAxisDescription());
 
             if (!enableFallbackLightViewPrimaryAxis()) {
               lightSettingsDirty |= ImGui::DragFloat3("Fallback Light Primary Axis", &fallbackLightPrimaryAxisObject(), 0.1f, 0.0f, 0.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
@@ -182,11 +180,7 @@ namespace dxvk {
 
     // Clear the lights and fallback light if the settings are dirty to recreate the lights on the next frame.
     if (lightSettingsDirty) {
-      clear();
-
-      // Note: Fallback light reset here so that changes to its settings will take effect, does not need to be part
-      // of usual light clearing logic though.
-      m_fallbackLight.reset();
+      clearFromUIThread();
     }
   }
 
@@ -241,9 +235,6 @@ namespace dxvk {
       return;
     }
     drawLightHash(light.getInitialHash(), light.getPosition(), worldToProj, drawList);
-    if (light.getInitialHash() != light.getInstanceHash()) {
-      drawLightHash(light.getInstanceHash(), light.getPosition(), worldToProj, drawList, true);
-    }
   }
 
   void drawToolTip(const RtLight& light) {
@@ -284,6 +275,8 @@ namespace dxvk {
         ImGui::Text("\tLength: %.2f", light.getCylinderLight().getAxisLength());
         ImGui::Text("\tAxis: %.2f %.2f %.2f", light.getCylinderLight().getAxis().x, light.getCylinderLight().getAxis().y, light.getCylinderLight().getAxis().z);
         break;
+      case RtLightType::Distant:
+        break;
       }
 
       if (pShaping) {
@@ -302,8 +295,26 @@ namespace dxvk {
 
       ImGui::Text("Volumetric Radiance Scale: %.2f", light.getVolumetricRadianceScale());
       ImGui::Text("Initial Hash: 0x%" PRIx64, light.getInitialHash());
-      ImGui::Text("Instance Hash: 0x%" PRIx64, light.getInstanceHash());
       ImGui::Text("Transformed Hash: 0x%" PRIx64, light.getTransformedHash());
+      if (light.getPrimInstanceOwner().getReplacementInstance() != nullptr) {
+        ImGui::Text("Replacement Index: %d", light.getPrimInstanceOwner().getReplacementIndex());
+        ImGui::Text("Is Root: %s", light.getPrimInstanceOwner().isRoot(&light) ? "Yes" : "No");
+        switch (light.getPrimInstanceOwner().getReplacementInstance()->root.getType()) {
+          case PrimInstance::Type::Instance:
+            ImGui::Text("Replacement Root is a Mesh");
+            break;
+          case PrimInstance::Type::Light:
+            ImGui::Text("Replacement Root is a Light");
+            break;
+          case PrimInstance::Type::Graph:
+            ImGui::Text("Replacement Root is a Graph");
+            break;
+          case PrimInstance::Type::None:
+            ImGui::Text("Replacement Root is Unknown");
+            break;
+        }
+      }
+      ImGui::Text("Frame last touched: %d", light.getFrameLastTouched());
       ImGui::Separator();
 
       if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
@@ -424,6 +435,7 @@ namespace dxvk {
     ImGui::SetNextWindowSize(viewport->Size);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.f, 0.f, 0.f, 0.0f));
     if (ImGui::Begin("Light Debug View", nullptr, ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings)) {
+      std::lock_guard<std::mutex> lock(m_lightUIMutex);
       ImDrawList* drawList = ImGui::GetWindowDrawList();
       drawList->PushClipRectFullScreen();
       const RtCamera& camera = device()->getCommon()->getSceneManager().getCamera();
@@ -435,6 +447,13 @@ namespace dxvk {
       for (auto&& linearizedLight : m_linearizedLights) {
         const RtLight* light = linearizedLight;
         if (light->getType() == RtLightType::Distant) {
+          continue;
+        }
+
+        if (light->getType() > RtLightType::Distant) {
+          // This happens because the linearizedLights stored pointers to the actual lights.
+          // the actual lights can be garbage collected after linearizedLights is made, but before this function runs.
+          Logger::err("tried to use a deleted light in showImguiDebugVisualization.");
           continue;
         }
 

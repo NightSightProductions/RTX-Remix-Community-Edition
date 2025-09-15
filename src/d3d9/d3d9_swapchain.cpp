@@ -192,7 +192,7 @@ namespace dxvk {
       if (BridgeMessageChannel::get().init(getWinProcHwnd(), D3D9WindowProc)) {
         // Send the initial state messages
         auto& gui = getDxvkDevice()->getCommon()->getImgui();
-        gui.switchMenu(RtxOptions::Get()->showUI(), true);
+        gui.switchMenu(RtxOptions::showUI(), true);
       } else {
         Logger::err("Unable to init bridge message channel. FSE and input capture may not work!");
       }
@@ -331,9 +331,9 @@ namespace dxvk {
     m_window = m_presentParams.hDeviceWindow;
 
     // NV-DXVK start: DLFG integration
-    if (RtxOptions::Get()->enableVsync() == EnableVsync::WaitingForImplicitSwapchain) {
+    if (RtxOptions::enableVsync() == EnableVsync::WaitingForImplicitSwapchain) {
       // save the vsync state when the first swapchain is created, to act as the default
-      RtxOptions::Get()->enableVsyncRef() = m_presentParams.PresentationInterval ? EnableVsync::On : EnableVsync::Off;
+      RtxOptions::enableVsyncState = m_presentParams.PresentationInterval ? EnableVsync::On : EnableVsync::Off;
     }
     // NV-DXVK end
 
@@ -419,7 +419,13 @@ namespace dxvk {
   }
 
   vk::Presenter* D3D9SwapChainEx::GetPresenter() const {
-    return m_presenter != nullptr ? m_presenter.ptr() : m_dlfgPresenter.ptr();
+    const auto presenter = m_presenter != nullptr ? m_presenter.ptr() : m_dlfgPresenter.ptr();
+
+    // Note: The returned presenter must be non-null as one of the two presenters must be non-null at all times,
+    // and because code will blindly dereference this returned pointer.
+    assert(presenter != nullptr);
+
+    return presenter;
   }
 
   HRESULT STDMETHODCALLTYPE D3D9SwapChainEx::Present(
@@ -452,7 +458,7 @@ namespace dxvk {
       presentInterval = options->presentInterval;
 
     // NV-DXVK start: Reflex integration
-    switch (RtxOptions::Get()->enableVsync()) {
+    switch (RtxOptions::enableVsyncState) {
     case EnableVsync::Off:
       presentInterval = 0;
       break;
@@ -1335,13 +1341,14 @@ namespace dxvk {
       // to ensure pacer thread is idle
       m_dlfgPresenter->synchronize();
     }
+
+    // flush all pending CS work
+    // this ensures any work that relies on the FG presenter is submitted before we
+    // synchronize the submission queue + GPU below
+    m_parent->SynchronizeCsThread();
     // NV-DXVK end
 
     m_device->waitForIdle();
-
-    // NV-DXVK start: DLFG integration
-    m_device->synchronizePresenter();
-    // NV-DXVK end
 
     m_presenter = nullptr;
     m_presentStatus.result = VK_SUCCESS;
@@ -1875,7 +1882,7 @@ namespace dxvk {
 
   VkFullScreenExclusiveEXT D3D9SwapChainEx::PickFullscreenMode() {
     // NV-DXVK start: App controlled FSE
-    if (!RtxOptions::Get()->allowFSE() || m_dialog || m_presentParams.Windowed)
+    if (!RtxOptions::allowFSE() || m_dialog || m_presentParams.Windowed)
       return VK_FULL_SCREEN_EXCLUSIVE_DISALLOWED_EXT;
 
     if (env::isRemixBridgeActive()) {

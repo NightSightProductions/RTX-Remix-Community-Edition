@@ -34,6 +34,7 @@
 #include "rtx_ngx_wrapper.h"
 #include "rtx_render/rtx_shader_manager.h"
 #include "rtx_imgui.h"
+#include "rtx_debug_view.h"
 
 #include "rtx_matrix_helpers.h"
 
@@ -54,30 +55,32 @@ namespace dxvk {
         BEGIN_PARAMETER()
         TEXTURE2D(RAY_RECONSTRUCTION_NORMALS_INPUT)
         TEXTURE2D(RAY_RECONSTRUCTION_VIRTUAL_NORMALS_INPUT)
-        TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_INDIRECT_SPECULAR_INPUT)
-        RW_TEXTURE2D(RAY_RECONSTRUCTION_NORMALS_OUTPUT)
         CONSTANT_BUFFER(RAY_RECONSTRUCTION_CONSTANTS_INPUT)
-        RW_TEXTURE2D(RAY_RECONSTRUCTION_HIT_DISTANCE_OUTPUT)
         // Primary surface data
-        RW_TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_ALBEDO_INPUT_OUTPUT)
-        RW_TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_SPECULAR_ALBEDO_INPUT_OUTPUT)
+        TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_INDIRECT_SPECULAR_INPUT)
         TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_ATTENUATION_INPUT)
         TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_VIRTUAL_WORLD_SHADING_NORMAL_INPUT)
-        RW_TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_DISOCCLUSION_THRESHOLD_MIX_INPUT_OUTPUT)
+        TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_CONE_RADIUS_INPUT)
+        TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_DISOCCLUSION_MASK_INPUT)
         // Secondary surface data
         TEXTURE2D(RAY_RECONSTRUCTION_SECONDARY_ALBEDO_INPUT)
         TEXTURE2D(RAY_RECONSTRUCTION_SECONDARY_SPECULAR_ALBEDO_INPUT)
         TEXTURE2D(RAY_RECONSTRUCTION_SECONDARY_ATTENUATION_INPUT)
         TEXTURE2D(RAY_RECONSTRUCTION_SECONDARY_VIRTUAL_WORLD_SHADING_NORMAL_INPUT)
-        TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_CONE_RADIUS_INPUT)
-        
-        TEXTURE2D(RAY_RECONSTRUCTION_COMBINED_INPUT)
-        TEXTURE2D(RAY_RECONSTRUCTION_SHARED_FLAGS_INPUT)
-        RW_TEXTURE2D(RAY_RECONSTRUCTION_DEBUG_VIEW_OUTPUT)
 
+        TEXTURE2D(RAY_RECONSTRUCTION_SHARED_FLAGS_INPUT)
+        TEXTURE2D(RAY_RECONSTRUCTION_COMBINED_INPUT)
         TEXTURE2D(RAY_RECONSTRUCTION_NORMALS_DLSSRR_INPUT)
         TEXTURE2D(RAY_RECONSTRUCTION_DEPTHS_INPUT)
         TEXTURE2D(RAY_RECONSTRUCTION_MOTION_VECTOR_INPUT)
+
+        RW_TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_ALBEDO_INPUT_OUTPUT)
+        RW_TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_SPECULAR_ALBEDO_INPUT_OUTPUT)
+
+        RW_TEXTURE2D(RAY_RECONSTRUCTION_NORMALS_OUTPUT)
+        RW_TEXTURE2D(RAY_RECONSTRUCTION_HIT_DISTANCE_OUTPUT)
+        RW_TEXTURE2D(RAY_RECONSTRUCTION_DEBUG_VIEW_OUTPUT)
+        RW_TEXTURE2D(RAY_RECONSTRUCTION_PRIMARY_DISOCCLUSION_MASK_OUTPUT)
 
         END_PARAMETER()
     };
@@ -102,7 +105,7 @@ namespace dxvk {
   }
 
   DxvkRayReconstruction::RayReconstructionParticleBufferMode DxvkRayReconstruction::getParticleBufferMode() {
-    return RtxOptions::Get()->isRayReconstructionEnabled() ? particleBufferMode() : RayReconstructionParticleBufferMode::None;
+    return RtxOptions::isRayReconstructionEnabled() ? particleBufferMode() : RayReconstructionParticleBufferMode::None;
   }
 
   void DxvkRayReconstruction::release() {
@@ -117,7 +120,7 @@ namespace dxvk {
   }
 
   bool DxvkRayReconstruction::useRayReconstruction() {
-    return supportsRayReconstruction() && RtxOptions::Get()->isRayReconstructionEnabled();
+    return supportsRayReconstruction() && RtxOptions::isRayReconstructionEnabled();
   }
 
   void DxvkRayReconstruction::dispatch(
@@ -127,6 +130,7 @@ namespace dxvk {
       bool resetHistory,
       float frameTimeMilliseconds) {
     ScopedGpuProfileZone(ctx, "Ray Reconstruction");
+    ctx->setFramePassStage(RtxFramePassStage::DLSSRR);
 
     if (!useRayReconstruction()) {
       return;
@@ -146,13 +150,14 @@ namespace dxvk {
     }
 
     SceneManager& sceneManager = device()->getCommon()->getSceneManager();
+    DebugView& debugView = ctx->getDevice()->getCommon()->metaDebugView();
 
     // prepare DLSS-RR inputs
     VkExtent3D workgroups = util::computeBlockCount(
       rtOutput.m_primaryLinearViewZ.view->imageInfo().extent, VkExtent3D { 16, 16, 1 });
 
     auto motionVectorInput = enableDLSSRRSurfaceReplacement() ? &rtOutput.m_primaryScreenSpaceMotionVectorDLSSRR : &rtOutput.m_primaryScreenSpaceMotionVector;
-    auto depthInput = enableDLSSRRSurfaceReplacement() ? &rtOutput.m_primaryDepthDLSSRR : &rtOutput.m_primaryDepth;
+    auto depthInput = enableDLSSRRSurfaceReplacement() ? &rtOutput.m_primaryDepthDLSSRR.resource(Resources::AccessType::Read) : &rtOutput.m_primaryDepth;
     
     {
       ScopedGpuProfileZone(ctx, "Prepare DLSS");
@@ -171,8 +176,14 @@ namespace dxvk {
       constants.enableDLSSRRInputs = enableDLSSRRSurfaceReplacement();
       constants.filterHitT = filterHitT();
       constants.particleBufferMode = (uint32_t)getParticleBufferMode();
+      constants.frameIdx = rtOutput.m_raytraceArgs.frameIdx;
+      constants.enableDisocclusionMaskBlur = enableDisocclusionMaskBlur();
+      constants.disocclusionMaskBlurRadius = disocclusionMaskBlurRadius();
+      constants.rcpSquaredDisocclusionMaskBlurGaussianWeightSigma = 1.0f / (disocclusionMaskBlurNormalizedGaussianWeightSigma() * disocclusionMaskBlurNormalizedGaussianWeightSigma());
       ctx->updateBuffer(m_constants, 0, sizeof(constants), &constants);
       ctx->getCommandList()->trackResource<DxvkAccess::Read>(m_constants);
+
+      // Inputs
 
       ctx->bindResourceBuffer(RAY_RECONSTRUCTION_CONSTANTS_INPUT, DxvkBufferSlice(m_constants, 0, m_constants->info().size));
 
@@ -184,14 +195,10 @@ namespace dxvk {
         ctx->bindResourceView(RAY_RECONSTRUCTION_VIRTUAL_NORMALS_INPUT, nullptr, nullptr);
       }
       ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_INDIRECT_SPECULAR_INPUT, rtOutput.m_primaryIndirectSpecularRadiance.view(Resources::AccessType::Read), nullptr);
-      ctx->bindResourceView(RAY_RECONSTRUCTION_HIT_DISTANCE_OUTPUT, rtOutput.m_rayReconstructionHitDistance.view(Resources::AccessType::Write), nullptr);
-      ctx->bindResourceView(RAY_RECONSTRUCTION_NORMALS_OUTPUT, m_normals.view, nullptr);
       // Primary data
-      ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_ALBEDO_INPUT_OUTPUT, rtOutput.m_primaryAlbedo.view, nullptr);
-      ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_SPECULAR_ALBEDO_INPUT_OUTPUT, rtOutput.m_primarySpecularAlbedo.view(Resources::AccessType::ReadWrite), nullptr);
       ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_ATTENUATION_INPUT, rtOutput.m_primaryAttenuation.view, nullptr);
       ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_VIRTUAL_WORLD_SHADING_NORMAL_INPUT, rtOutput.m_primaryVirtualWorldShadingNormalPerceptualRoughness.view, nullptr);
-      ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_DISOCCLUSION_THRESHOLD_MIX_INPUT_OUTPUT, rtOutput.m_primaryDisocclusionThresholdMix.view, nullptr);
+      ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_DISOCCLUSION_MASK_INPUT, rtOutput.m_primaryDisocclusionThresholdMix.view, nullptr);
 
       // Secondary data
       ctx->bindResourceView(RAY_RECONSTRUCTION_SECONDARY_ALBEDO_INPUT, rtOutput.m_secondaryAlbedo.view, nullptr);
@@ -200,15 +207,24 @@ namespace dxvk {
       ctx->bindResourceView(RAY_RECONSTRUCTION_SECONDARY_VIRTUAL_WORLD_SHADING_NORMAL_INPUT, rtOutput.m_secondaryVirtualWorldShadingNormalPerceptualRoughness.view, nullptr);
       ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_CONE_RADIUS_INPUT, rtOutput.m_primaryConeRadius.view, nullptr);
 
+      ctx->bindResourceView(RAY_RECONSTRUCTION_SHARED_FLAGS_INPUT, rtOutput.m_sharedFlags.view, nullptr);
+      ctx->bindResourceView(RAY_RECONSTRUCTION_COMBINED_INPUT, rtOutput.m_compositeOutput.view(Resources::AccessType::Read), nullptr);
       // DLSSRR data
-      ctx->bindResourceView(RAY_RECONSTRUCTION_NORMALS_DLSSRR_INPUT, rtOutput.m_primaryWorldShadingNormalDLSSRR.view, nullptr);
+      ctx->bindResourceView(RAY_RECONSTRUCTION_NORMALS_DLSSRR_INPUT, rtOutput.m_primaryWorldShadingNormalDLSSRR.view(Resources::AccessType::Read), nullptr);
       ctx->bindResourceView(RAY_RECONSTRUCTION_DEPTHS_INPUT, depthInput->view, nullptr);
       ctx->bindResourceView(RAY_RECONSTRUCTION_MOTION_VECTOR_INPUT, motionVectorInput->view, nullptr);
 
-      DebugView& debugView = ctx->getDevice()->getCommon()->metaDebugView();
+      // Inputs/Outputs
+
+      ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_ALBEDO_INPUT_OUTPUT, rtOutput.m_primaryAlbedo.view, nullptr);
+      ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_SPECULAR_ALBEDO_INPUT_OUTPUT, rtOutput.m_primarySpecularAlbedo.view(Resources::AccessType::ReadWrite), nullptr);
+
+      // Outputs
+
+      ctx->bindResourceView(RAY_RECONSTRUCTION_NORMALS_OUTPUT, m_normals.view, nullptr);
+      ctx->bindResourceView(RAY_RECONSTRUCTION_HIT_DISTANCE_OUTPUT, rtOutput.m_rayReconstructionHitDistance.view(Resources::AccessType::Write), nullptr);
       ctx->bindResourceView(RAY_RECONSTRUCTION_DEBUG_VIEW_OUTPUT, debugView.getDebugOutput(), nullptr);
-      ctx->bindResourceView(RAY_RECONSTRUCTION_SHARED_FLAGS_INPUT, rtOutput.m_sharedFlags.view, nullptr);
-      ctx->bindResourceView(RAY_RECONSTRUCTION_COMBINED_INPUT, rtOutput.m_compositeOutput.view(Resources::AccessType::Read), nullptr);
+      ctx->bindResourceView(RAY_RECONSTRUCTION_PRIMARY_DISOCCLUSION_MASK_OUTPUT, rtOutput.m_primaryDisocclusionMaskForRR.view(Resources::AccessType::Write), nullptr);
 
       ctx->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, PrepareRayReconstructionShader::getShader());
 
@@ -238,7 +254,7 @@ namespace dxvk {
         rtOutput.m_primaryPerceptualRoughness.view,
         rtOutput.m_rayReconstructionHitDistance.view(Resources::AccessType::Read),
         rtOutput.m_primaryScreenSpaceMotionVectorDLSSRR.view,
-        rtOutput.m_primaryDepthDLSSRR.view
+        rtOutput.m_primaryDepthDLSSRR.view(Resources::AccessType::Read)
       };
 
       const DxvkAutoExposure& autoExposure = device()->getCommon()->metaAutoExposure();
@@ -265,6 +281,10 @@ namespace dxvk {
           input->imageInfo().layout,
           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
           VK_ACCESS_SHADER_READ_BIT);
+
+#ifdef REMIX_DEVELOPMENT
+        ctx->cacheResourceAliasingImageView(input);
+#endif
       }
 
       for (auto output : pOutputs) {
@@ -277,6 +297,10 @@ namespace dxvk {
           output->imageInfo().layout,
           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
           VK_ACCESS_SHADER_WRITE_BIT);
+
+#ifdef REMIX_DEVELOPMENT
+        ctx->cacheResourceAliasingImageView(output);
+#endif
       }
 
       barriers.recordCommands(ctx->getCommandList());
@@ -305,7 +329,9 @@ namespace dxvk {
       buffers.pBiasCurrentColorMask = &rtOutput.m_sharedBiasCurrentColorMask.resource(Resources::AccessType::Read);
       buffers.pHitDistance = useSpecularHitDistance() ? &rtOutput.m_rayReconstructionHitDistance.resource(Resources::AccessType::Read) : nullptr;
       buffers.pInTransparencyLayer = getParticleBufferMode() == RayReconstructionParticleBufferMode::RayReconstructionUpscaling ? &rtOutput.m_rayReconstructionParticleBuffer : nullptr;
-      buffers.pDisocclusionMask = &rtOutput.m_primaryDisocclusionThresholdMix;
+      buffers.pDisocclusionMask = enableDisocclusionMaskBlur()
+        ? &rtOutput.m_primaryDisocclusionMaskForRR.resource(Resources::AccessType::Read)
+        : &rtOutput.m_primaryDisocclusionThresholdMix;
 
       NGXRayReconstructionContext::NGXSettings settings;
       settings.resetAccumulation = resetHistory;
@@ -345,9 +371,12 @@ namespace dxvk {
     if (showAdvancedSettings) {
       bool presetChanged = ImGui::Combo("DLSS-RR Preset", &pathTracerPresetObject(), "Default\0ReSTIR Finetuned\0");
       if (presetChanged) {
-        RtxOptions::Get()->updatePathTracerPreset(pathTracerPreset());
+        RtxOptions::updatePathTracerPreset(pathTracerPreset());
       }
-      
+
+      constexpr ImGuiSliderFlags sliderFlags = ImGuiSliderFlags_AlwaysClamp;
+      constexpr ImGuiTreeNodeFlags collapsingHeaderClosedFlags = ImGuiTreeNodeFlags_CollapsingHeader;
+
       ImGui::Checkbox("Use Virtual Normals", &m_useVirtualNormals);
       ImGui::Combo("Particle Mode", &particleBufferModeObject(), "None\0DLSS-RR Upscaling\0");
       ImGui::Checkbox("Use Specular Hit Distance", &useSpecularHitDistanceObject());
@@ -361,8 +390,18 @@ namespace dxvk {
       ImGui::Checkbox("DLSS-RR Demodulate Roughness", &demodulateRoughnessObject());
       ImGui::DragFloat("DLSS-RR Roughness Sensitivity", &upscalerRoughnessDemodulationOffsetObject(), 0.01f, 0.0f, 2.0f, "%.3f");
       ImGui::DragFloat("DLSS-RR Roughness Multiplier", &upscalerRoughnessDemodulationMultiplierObject(), 0.01f, 0.0f, 20.0f, "%.3f");
-      ImGui::Checkbox("Composite Volumetric Light", &compositeVolumetricLightObject());
+      ImGui::Checkbox("Composite Volumetric Light", &compositeVolumetricLightObject());      
       ImGui::Checkbox("Transformer Model D", &enableTransformerModelDObject());
+
+      if (ImGui::CollapsingHeader("Disocclusion Mask", collapsingHeaderClosedFlags)) {
+        ImGui::Indent();
+
+        ImGui::Checkbox("Blur", &enableDisocclusionMaskBlurObject());
+        ImGui::DragInt("Blur Radius", &disocclusionMaskBlurRadiusObject(), 1.f, 1, 64, "%d", sliderFlags);
+        ImGui::DragFloat("Blur Normalized Gaussian Weight Sigma", &disocclusionMaskBlurNormalizedGaussianWeightSigmaObject(), 0.01f, 0.0f, 3.0f, "%.3f", sliderFlags);
+
+        ImGui::Unindent();
+      }
     }
   }
 

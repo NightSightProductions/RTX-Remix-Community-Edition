@@ -45,7 +45,7 @@ namespace dxvk {
     using namespace std::chrono;
 
     // Should we show the splash message?  Don't if hidden, or if UI already active
-    if (!m_hasStarted && !SplashSettings::hideSplashMessage() && RtxOptions::Get()->showUI() == UIType::None) {
+    if (!m_hasStarted && !SplashSettings::hideSplashMessage() && RtxOptions::showUI() == UIType::None) {
       // No need to start again
       m_hasStarted = true;
 
@@ -84,7 +84,7 @@ namespace dxvk {
       ));
 
       if (ImGui::Begin("Splash Message", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove)) {
-        const auto keyBindDescriptor = buildKeyBindDescriptorString(RtxOptions::Get()->remixMenuKeyBinds());
+        const auto keyBindDescriptor = buildKeyBindDescriptorString(RtxOptions::remixMenuKeyBinds());
         std::string message = str::format("Welcome to RTX Remix. Use ", keyBindDescriptor, " to access the RTX Remix Menu and change settings. Closing in ", clampedSecondsRemaining);
         ImGui::Text(message.c_str());
       }

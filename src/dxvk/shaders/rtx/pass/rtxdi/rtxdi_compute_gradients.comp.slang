@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2022-2023, NVIDIA CORPORATION. All rights reserved.
+* Copyright (c) 2022-2025, NVIDIA CORPORATION. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -148,27 +148,36 @@ void main(uint2 GlobalIndex : SV_DispatchThreadID)
         minimalSurfaceInteraction = minimalSurfaceInteractionReadFromGBuffer(
           selectedPixelPos, CurrentWorldPosition_WorldTriangleNormal);
       }
+      
+      if (minimalSurfaceInteraction.isValid)
+      {
+        minimalSurfaceInteraction.positionError = positionError;
 
-      minimalSurfaceInteraction.positionError = positionError;
-
-      // Reconstruct the light sample
-      RAB_LightSample lightSample = RAB_GetPortalSpaceLightSample(selectedMappedLightIndex,
+        // Reconstruct the light sample
+        RAB_LightSample lightSample = RAB_GetPortalSpaceLightSample(selectedMappedLightIndex,
         selectedReservoir.uv, selectedReservoir.portalIdx, minimalSurfaceInteraction, !usePrevSample);
   
-      const GeometryFlags geometryFlags = geometryFlagsReadFromGBuffer(selectedPixelPos, SharedFlags);
+        const GeometryFlags geometryFlags = geometryFlagsReadFromGBuffer(selectedPixelPos, SharedFlags);
 
-      // Calculate weighted illuminance for the other (previous or current) surface
-      // using the other light sample.
-      float newIlluminance = getSurfaceIlluminance(lightSample, selectedReservoir.weightSum, selectedReservoir.portalIdx, 
+        // Calculate weighted illuminance for the other (previous or current) surface
+        // using the other light sample.
+        float newIlluminance = getSurfaceIlluminance(lightSample, selectedReservoir.weightSum, selectedReservoir.portalIdx,
         minimalSurfaceInteraction, coneRadiusAtSurface, geometryFlags.portalSpace, geometryFlags.objectMask, geometryFlags.isViewModel, !usePrevSample && cb.enablePreviousTLAS);
 
-      // Convert to FP16 and back to avoid false-positive gradients due to precision loss in the 
-      // CurrentRtxdiLuminance and PreviousRtxdiLuminance textures where selectedDiffSpecLum comes from.
-      newIlluminance = f16tof32(f32tof16(newIlluminance));
+        // Convert to FP16 and back to avoid false-positive gradients due to precision loss in the 
+        // CurrentRtxdiLuminance and PreviousRtxdiLuminance textures where selectedDiffSpecLum comes from.
+        newIlluminance = f16tof32(f32tof16(newIlluminance));
 
-      // Compute the gradient
-      gradient.y = max(selectedIlluminance, newIlluminance);
-      gradient.x = min(abs(selectedIlluminance - newIlluminance), gradient.y);
+        // Compute the gradient
+        gradient.y = max(selectedIlluminance, newIlluminance);
+        gradient.x = min(abs(selectedIlluminance - newIlluminance), gradient.y);
+      }
+      else
+      {
+        // Light index mapping was unsuccessful, which means the light has either appeared or disappeared.
+        // Which means the gradient is 100% of the pixel's illuminance.
+        gradient.xy = selectedIlluminance;
+      }
     }
     else
     {
@@ -202,8 +211,10 @@ void main(uint2 GlobalIndex : SV_DispatchThreadID)
   {
     uint2 pixelIndex = GlobalIndex* RTXDI_GRAD_FACTOR;
     bool isValid = true;
+
     // DEBUG_VIEW_RTXDI_GRADIENTS
     isValid &= isValidValue(normalizedGradient);
+    
     accumulateInDebugViewAnd(pixelIndex, isValid);
   }
 }

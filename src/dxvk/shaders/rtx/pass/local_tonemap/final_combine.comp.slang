@@ -23,28 +23,28 @@
 #include "rtx/pass/tonemap/tonemapping.slangh"
 #include "rtx/pass/tonemap/tonemapping_noise.slangh"
 
-layout(uint, binding = FINAL_COMBINE_BLUE_NOISE_TEXTURE_INPUT)
+[[vk::binding(FINAL_COMBINE_BLUE_NOISE_TEXTURE_INPUT)]]
 Texture2DArray BlueNoise;
 
-layout(binding = FINAL_COMBINE_MIP_ASSEMBLE)
+[[vk::binding(FINAL_COMBINE_MIP_ASSEMBLE)]]
 Sampler2D MipAssembleTexture;
 
-layout(binding = FINAL_COMBINE_ORIGINAL_MIP0)
+[[vk::binding(FINAL_COMBINE_ORIGINAL_MIP0)]]
 Texture2D<vec4> OriginalMip0Texture;
 
-layout(binding = FINAL_COMBINE_WEIGHT_MIP0)
+[[vk::binding(FINAL_COMBINE_WEIGHT_MIP0)]]
 Texture2D<vec4> WeightMip0Texture;
 
-layout(binding = FINAL_COMBINE_ORIGINAL_MIP)
+[[vk::binding(FINAL_COMBINE_ORIGINAL_MIP)]]
 Sampler2D OriginalMipTexture;
 
-layout(binding = FINAL_COMBINE_OUTPUT)
+[[vk::binding(FINAL_COMBINE_OUTPUT)]]
 RWTexture2D<vec4> OutputTexture;
 
-layout(binding = FINAL_COMBINE_DEBUG_VIEW_OUTPUT)
+[[vk::binding(FINAL_COMBINE_DEBUG_VIEW_OUTPUT)]]
 RWTexture2D<float4> DebugView;
 
-layout(binding = FINAL_COMBINE_EXPOSURE)
+[[vk::binding(FINAL_COMBINE_EXPOSURE)]]
 RWTexture1D<float> AutoExposureTexture;
 
 #include "rtx/utility/debug_view_helpers.slangh"
@@ -105,9 +105,10 @@ void main(uint2 threadId : SV_DispatchThreadID)
     mix(1.0, finalMultiplier, (luminance / lerpToUnityThreshold) * (luminance / lerpToUnityThreshold));
 
   vec3 texelFinal = originalColor.xyz * finalMultiplier;
-  if (cb.finalizeWithACES)
+  if (cb.finalizeWithACES || cb.useAgX)
   {
-    texelFinal = ACESFilm(texelFinal, cb.useLegacyACES);
+    texelFinal = applyToneMapping(texelFinal, cb.useAgX, cb.useLegacyACES, cb.agxGamma, cb.agxSaturation, cb.agxExposureOffset,
+                                  cb.agxLook, cb.agxContrast, cb.agxSlope, cb.agxPower);
   }
   if (cb.performSRGBConversion)
   {

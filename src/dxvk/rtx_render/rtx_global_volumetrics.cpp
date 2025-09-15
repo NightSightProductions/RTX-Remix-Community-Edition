@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+* Copyright (c) 2023-2025, NVIDIA CORPORATION. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -22,6 +22,7 @@
 #include "rtx_global_volumetrics.h"
 #include "dxvk_device.h"
 #include "rtx_render/rtx_shader_manager.h"
+#include "rtx_composite.h"
 
 #include "rtx/pass/common_binding_indices.h"
 #include "rtx/pass/volumetrics/volume_integrate_binding_indices.h"
@@ -129,76 +130,49 @@ namespace dxvk {
           Vector3(0.999f, 0.999f, 0.999f),  // transmittanceColor
           200.0f,                         // transmittanceMeasurementDistance
           Vector3(0.999f, 0.999f, 0.999f),  // singleScatteringAlbedo
-          0.0f,                             // anisotropy
-          false,                            // enableHeterogeneousFog
-          0.01f,                            // noiseFieldSpatialFrequency
-          3,                                // noiseFieldOctaves
-          1.0f                              // noiseFieldDensityScale
+          0.0f                             // anisotropy
       ),
       RtxGlobalVolumetrics::Preset( // HeavyFog
           Vector3(0.85f, 0.85f, 0.85f),
           5.0f,
           Vector3(0.9f, 0.9f, 0.9f),
-          -0.2f,
-          false,
-          0.01f,
-          3,
-          2.0f
+          -0.2f
       ),
       RtxGlobalVolumetrics::Preset( // LightFog
           Vector3(0.93f, 0.93f, 0.93f),
           15.0f,
           Vector3(0.95f, 0.95f, 0.95f),
-          -0.1f,
-          false,
-          0.03f,
-          2,
-          1.0f
+          -0.1f
       ),
       RtxGlobalVolumetrics::Preset( // Mist
           Vector3(0.96f, 0.96f, 0.96f),
           50.0f,
           Vector3(0.98f, 0.98f, 0.98f),
-          0.1f,
-          false,
-          0.04f,
-          3,
-          0.5f
+          0.1f
       ),
       RtxGlobalVolumetrics::Preset( // Haze
           Vector3(0.9f, 0.85f, 0.75f),
           70.0f,
           Vector3(0.8f, 0.8f, 0.8f),
-          0.2f,
-          false,
-          0.02f,
-          2,
-          0.8f
+          0.2f
       ),
       RtxGlobalVolumetrics::Preset( // Dust
           Vector3(0.87f, 0.73f, 0.5f),
           60.0f,
           Vector3(0.85f, 0.75f, 0.65f),
-          0.3f,
-          false,
-          0.02f,
-          3,
-          1.5f
+          0.4f
       ),
       RtxGlobalVolumetrics::Preset( // Smoke
           Vector3(0.87f, 0.73f, 0.5f),
           20.0f,
           Vector3(0.85f, 0.75f, 0.65f),
-          0.5f,
-          false,
-          0.02f,
-          3,
-          1.5f
+          0.6f
       )
   };
 
   RtxGlobalVolumetrics::RtxGlobalVolumetrics(DxvkDevice* device) : CommonDeviceObject(device), RtxPass(device) {
     // Volumetrics Options
+
     RTX_OPTION_CLAMP_MIN(froxelGridResolutionScale, static_cast<uint32_t>(1));
     RTX_OPTION_CLAMP(froxelDepthSlices, static_cast<uint16_t>(1), std::numeric_limits<uint16_t>::max());
     RTX_OPTION_CLAMP(restirFroxelDepthSlices, static_cast<uint16_t>(1), std::numeric_limits<uint16_t>::max());
@@ -214,12 +188,23 @@ namespace dxvk {
     RTX_OPTION_CLAMP_MIN(transmittanceMeasurementDistanceMeters, 0.0f);
     RTX_OPTION_CLAMP(anisotropy, -1.0f, 1.0f);
 
-    transmittanceColorRef().x = std::clamp(transmittanceColor().x, 0.0f, 1.0f);
-    transmittanceColorRef().y = std::clamp(transmittanceColor().y, 0.0f, 1.0f);
-    transmittanceColorRef().z = std::clamp(transmittanceColor().z, 0.0f, 1.0f);
-    singleScatteringAlbedoRef().x = std::clamp(singleScatteringAlbedo().x, 0.0f, 1.0f);
-    singleScatteringAlbedoRef().y = std::clamp(singleScatteringAlbedo().y, 0.0f, 1.0f);
-    singleScatteringAlbedoRef().z = std::clamp(singleScatteringAlbedo().z, 0.0f, 1.0f);
+    transmittanceColor.setDeferred(Vector3(
+      std::clamp(transmittanceColor().x, 0.0f, 1.0f),
+      std::clamp(transmittanceColor().y, 0.0f, 1.0f),
+      std::clamp(transmittanceColor().z, 0.0f, 1.0f)));
+    singleScatteringAlbedo.setDeferred(Vector3(
+      std::clamp(singleScatteringAlbedo().x, 0.0f, 1.0f),
+      std::clamp(singleScatteringAlbedo().y, 0.0f, 1.0f),
+      std::clamp(singleScatteringAlbedo().z, 0.0f, 1.0f)));
+
+    RTX_OPTION_CLAMP_MIN(noiseFieldSubStepSizeMeters, 0.0f);
+    RTX_OPTION_CLAMP_MIN(noiseFieldTimeScale, 0.0f);
+    RTX_OPTION_CLAMP_MIN(noiseFieldDensityScale, 0.0f);
+    RTX_OPTION_CLAMP_MIN(noiseFieldDensityExponent, 0.0f);
+    RTX_OPTION_CLAMP(noiseFieldOctaves, static_cast<uint32_t>(1), static_cast<uint32_t>(8));
+    RTX_OPTION_CLAMP_MIN(noiseFieldInitialFrequencyPerMeter, 0.0f);
+    RTX_OPTION_CLAMP_MIN(noiseFieldLacunarity, 0.0f);
+    RTX_OPTION_CLAMP_MIN(noiseFieldGain, 0.0f);
 
     RTX_OPTION_CLAMP_MIN(fogRemapMaxDistanceMinMeters, 0.0f);
     RTX_OPTION_CLAMP_MIN(fogRemapMaxDistanceMaxMeters, 0.0f);
@@ -227,10 +212,10 @@ namespace dxvk {
     RTX_OPTION_CLAMP_MIN(fogRemapTransmittanceMeasurementDistanceMaxMeters, 0.0f);
     RTX_OPTION_CLAMP_MIN(fogRemapColorMultiscatteringScale, 0.0f);
 
-    fogRemapMaxDistanceMinMetersRef() = std::min(fogRemapMaxDistanceMinMeters(), fogRemapMaxDistanceMaxMeters());
-    fogRemapMaxDistanceMaxMetersRef() = std::max(fogRemapMaxDistanceMinMeters(), fogRemapMaxDistanceMaxMeters());
-    fogRemapTransmittanceMeasurementDistanceMinMetersRef() = std::min(fogRemapTransmittanceMeasurementDistanceMinMeters(), fogRemapTransmittanceMeasurementDistanceMaxMeters());
-    fogRemapTransmittanceMeasurementDistanceMaxMetersRef() = std::max(fogRemapTransmittanceMeasurementDistanceMinMeters(), fogRemapTransmittanceMeasurementDistanceMaxMeters());
+    fogRemapMaxDistanceMinMeters.setDeferred(std::min(fogRemapMaxDistanceMinMeters(), fogRemapMaxDistanceMaxMeters()));
+    fogRemapMaxDistanceMaxMeters.setDeferred(std::max(fogRemapMaxDistanceMinMeters(), fogRemapMaxDistanceMaxMeters()));
+    fogRemapTransmittanceMeasurementDistanceMinMeters.setDeferred(std::min(fogRemapTransmittanceMeasurementDistanceMinMeters(), fogRemapTransmittanceMeasurementDistanceMaxMeters()));
+    fogRemapTransmittanceMeasurementDistanceMaxMeters.setDeferred(std::max(fogRemapTransmittanceMeasurementDistanceMinMeters(), fogRemapTransmittanceMeasurementDistanceMaxMeters()));
   }
 
   // Quality level presets, x component controls the froxelGridResolutionScale and the y component controls the froxelDepthSlices settings.
@@ -254,29 +239,34 @@ namespace dxvk {
     int2(8,  48)
   };
 
+  void RtxGlobalVolumetrics::showPresetMenu() {
+    const char* volumericQualityLevelName[] = {
+      "Low",
+      "Medium",
+      "High",
+      "Ultra",
+      "Insane"
+    };
+    static_assert(sizeof(volumericQualityLevelName) / sizeof(volumericQualityLevelName[0]) == QualityLevel::QualityCount);
+
+    for (uint32_t i = 0; i < QualityLevel::QualityCount; i++) {
+      if (ImGui::Button(volumericQualityLevelName[i])) {
+        setQualityLevel((QualityLevel) i);
+      }
+      ImGui::SameLine();
+    }
+    ImGui::TextUnformatted("Quality Level Preset");
+  }
+
+  void RtxGlobalVolumetrics::showImguiUserSettings() {
+    showPresetMenu();
+  }
+
   void RtxGlobalVolumetrics::showImguiSettings() {
     if (ImGui::CollapsingHeader("Froxel Radiance Cache", ImGuiTreeNodeFlags_CollapsingHeader | ImGuiTreeNodeFlags_DefaultOpen)) {
       ImGui::Indent();
 
-      const char* volumericQualityLevelName[] = {
-        "Low",
-        "Medium",
-        "High",
-        "Ultra",
-        "Insane"
-      };
-      static_assert(sizeof(volumericQualityLevelName) / sizeof(volumericQualityLevelName[0]) == QualityLevel::QualityCount);
-
-      ImGui::Text("Set Quality Level Preset:");
-      for (uint32_t i = 0; i < QualityLevel::QualityCount; i++) {
-        if (ImGui::Button(volumericQualityLevelName[i])) {
-          setQualityLevel((QualityLevel) i);
-        }
-
-        if (i < QualityLevel::QualityCount - 1) {
-          ImGui::SameLine();
-        }
-      }
+      showPresetMenu();
 
       ImGui::Separator();
 
@@ -347,16 +337,17 @@ namespace dxvk {
         };
         static_assert((sizeof(volumericPresetName) / sizeof(volumericPresetName[0]) - 1) == PresetType::PresetCount);
 
-        ImGui::Text("Set Quality Level Preset:");
+        ImGui::Text("Volumetric Visual Presets:");
 
-        const int indent = 200;
+        const float indent = 60.0f;
         static int itemIndex = 0;
-        ImGui::PushItemWidth(ImGui::GetWindowWidth() - indent);
+        ImGui::PushItemWidth(ImGui::GetContentRegionMax().x - indent);
         ImGui::PushID("volumetric visual preset");
         ImGui::ListBox("", &itemIndex, &volumericPresetName[0], (int) PresetType::PresetCount + 1, 3);
         ImGui::PopID();
         ImGui::PopItemWidth();
-        if (ImGui::Button("Apply") && indent > 0) {
+
+        if (ImGui::Button("Apply", ImVec2(ImGui::GetContentRegionMax().x - indent, 0)) && itemIndex > 0) {
           setPreset((PresetType) (itemIndex - 1));
           itemIndex = 0;
         }
@@ -379,9 +370,13 @@ namespace dxvk {
 
           ImGui::BeginDisabled(!enableHeterogeneousFog());
           ImGui::DragFloat("Noise Field Substep Size", &noiseFieldSubStepSizeMetersObject(), 0.01f, 0.0f, FLT_MAX, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-          ImGui::DragFloat("Noise Field Spatial Frequency", &noiseFieldSpatialFrequencyObject(), 0.01f, 0.0f, FLT_MAX, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-          ImGui::DragInt("Noise Field Number of Octaves", &noiseFieldOctavesObject(), 1.f, 0, 10);
+          ImGui::DragInt("Noise Field Number of Octaves", &noiseFieldOctavesObject(), 0.05f, 1, 8);
+          ImGui::DragFloat("Noise Field Time Scale", &noiseFieldTimeScaleObject(), 0.01f, 0.0f, FLT_MAX, "%.2f", ImGuiSliderFlags_AlwaysClamp);
           ImGui::DragFloat("Noise Field Density Scale", &noiseFieldDensityScaleObject(), 0.01f, 0.0f, FLT_MAX, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("Noise Field Density Exponent", &noiseFieldDensityExponentObject(), 0.01f, 0.0f, FLT_MAX, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("Noise Field Initial Frequency", &noiseFieldInitialFrequencyPerMeterObject(), 0.01f, 0.0f, FLT_MAX, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("Noise Field Lacunarity", &noiseFieldLacunarityObject(), 0.01f, 0.0f, FLT_MAX, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          ImGui::DragFloat("Noise Field Gain", &noiseFieldGainObject(), 0.01f, 0.0f, FLT_MAX, "%.2f", ImGuiSliderFlags_AlwaysClamp);
           ImGui::EndDisabled();
         }
 
@@ -432,7 +427,9 @@ namespace dxvk {
       ImGui::Separator();
       ImGui::Dummy({ 0, 4 });
       {
+        ImGui::Indent();
         m_device->getCommon()->metaComposite().showDepthBasedFogImguiSettings();
+        ImGui::Unindent();
       }
 
       ImGui::Unindent();
@@ -451,25 +448,35 @@ namespace dxvk {
       qualityPreset = qualityModes[desiredQualityLevel];
     }
 
-    froxelGridResolutionScaleRef() = qualityPreset.x;
-    froxelDepthSlicesRef() = qualityPreset.y;
+    // Set new values based on preset values and cache old values
 
-    m_rebuildFroxels = true;
+    const auto newFroxelGridResolutionScale = qualityPreset.x;
+    const auto newFroxelDepthSlices = qualityPreset.y;
+    const auto oldFroxelGridResolutionScale = froxelGridResolutionScale();
+    const auto oldFroxelDepthSlices = froxelDepthSlices();
+
+    froxelGridResolutionScale.setDeferred(newFroxelGridResolutionScale);
+    froxelDepthSlices.setDeferred(newFroxelDepthSlices);
+
+    // Indicate that the froxel resources should be rebuilt if any relevant values changed
+
+    if (
+      newFroxelGridResolutionScale != oldFroxelGridResolutionScale ||
+      newFroxelDepthSlices != oldFroxelDepthSlices
+    ) {
+      m_rebuildFroxels = true;
+    }
   }
 
   void RtxGlobalVolumetrics::setPreset(const PresetType presetType) {
     const RtxGlobalVolumetrics::Preset& preset = Presets[presetType];
 
     // Set RTX options using the values from the preset
-    transmittanceColorRef() = preset.transmittanceColor;
-    transmittanceMeasurementDistanceMetersRef() = preset.transmittanceMeasurementDistance;
-    singleScatteringAlbedoRef() = preset.singleScatteringAlbedo;
-    anisotropyRef() = preset.anisotropy;
-    enableHeterogeneousFogRef() = preset.enableHeterogeneousFog;
-    noiseFieldSpatialFrequencyRef() = preset.noiseFieldSpatialFrequency;
-    noiseFieldOctavesRef() = preset.noiseFieldOctaves;
-    noiseFieldDensityScaleRef() = preset.noiseFieldDensityScale;
-    enableFogRemapRef() = false;
+    transmittanceColor.setDeferred(preset.transmittanceColor);
+    transmittanceMeasurementDistanceMeters.setDeferred(preset.transmittanceMeasurementDistance);
+    singleScatteringAlbedo.setDeferred(preset.singleScatteringAlbedo);
+    anisotropy.setDeferred(preset.anisotropy);
+    enableFogRemap.setDeferred(false);
   }
 
   // This function checks the fog density to determine using physical fog or fix function fog.
@@ -503,11 +510,11 @@ namespace dxvk {
     // Calculate the volumetric parameters from options and the fixed function fog state
 
     // Note: Volumetric transmittance color option is in gamma space, so must be converted to linear for usage in the volumetric system.
-    Vector3 transmittanceColor { sRGBGammaToLinear(m_transmittanceColor) };
+    Vector3 transmittanceColorLinear{ sRGBGammaToLinear(transmittanceColor()) };
 
     // Note: Fall back to usual default in cases such as the "none" D3D fog mode, no fog remapping specified, or invalid values in the fog mode derivation
     // (such as dividing by zero).
-    float transmittanceMeasurementDistance = m_transmittanceMeasurementDistanceMeters * RtxOptions::Get()->getMeterToWorldUnitScale();
+    float transmittanceMeasurementDistance = transmittanceMeasurementDistanceMeters() * RtxOptions::getMeterToWorldUnitScale();
     Vector3 multiScatteringEstimate = Vector3();
 
     // Todo: Make this configurable in the future as this threshold was created specifically for Portal RTX's underwater fixed function fog.
@@ -525,11 +532,11 @@ namespace dxvk {
       if (enableFogColorRemap()) {
         // Note: Legacy fixed function fog color is in gamma space as all the rendering in old games was typically in gamma space, same assumption we make
         // for textures/lights.
-        transmittanceColor = sRGBGammaToLinear(fogState.color);
+        transmittanceColorLinear = sRGBGammaToLinear(fogState.color);
       }
 
       // Clamp to avoid black color, which may cause NaN issue.
-      transmittanceColor = clamp(transmittanceColor, Vector3(MinTransmittanceValue), Vector3(MaxTransmittanceValue));
+      transmittanceColorLinear = clamp(transmittanceColorLinear, Vector3(MinTransmittanceValue), Vector3(MaxTransmittanceValue));
 
       // Handle Fog Max Distance remapping
 
@@ -537,36 +544,36 @@ namespace dxvk {
         // Switch transmittance measurement distance derivation from D3D9 fog based on which fog mode is in use
 
         if (fogState.mode == D3DFOG_LINEAR) {
-          float fogRemapMaxDistanceMinMeters { m_fogRemapMaxDistanceMinMeters * RtxOptions::Get()->getMeterToWorldUnitScale() };
-          float fogRemapMaxDistanceMaxMeters { m_fogRemapMaxDistanceMaxMeters * RtxOptions::Get()->getMeterToWorldUnitScale() };
-          float fogRemapTransmittanceMeasurementDistanceMinMeters { m_fogRemapTransmittanceMeasurementDistanceMinMeters * RtxOptions::Get()->getMeterToWorldUnitScale() };
-          float fogRemapTransmittanceMeasurementDistanceMaxMeters { m_fogRemapTransmittanceMeasurementDistanceMaxMeters * RtxOptions::Get()->getMeterToWorldUnitScale() };
+          float fogRemapMaxDistanceMin { fogRemapMaxDistanceMinMeters() * RtxOptions::getMeterToWorldUnitScale() };
+          float fogRemapMaxDistanceMax { fogRemapMaxDistanceMaxMeters() * RtxOptions::getMeterToWorldUnitScale() };
+          float fogRemapTransmittanceMeasurementDistanceMin { fogRemapTransmittanceMeasurementDistanceMinMeters() * RtxOptions::getMeterToWorldUnitScale() };
+          float fogRemapTransmittanceMeasurementDistanceMax { fogRemapTransmittanceMeasurementDistanceMaxMeters() * RtxOptions::getMeterToWorldUnitScale() };
 
           // Note: Ensure the mins and maxes are consistent with eachother.
-          fogRemapMaxDistanceMaxMeters = std::max(fogRemapMaxDistanceMaxMeters, fogRemapMaxDistanceMinMeters);
-          fogRemapTransmittanceMeasurementDistanceMaxMeters = std::max(fogRemapTransmittanceMeasurementDistanceMaxMeters, fogRemapTransmittanceMeasurementDistanceMinMeters);
+          fogRemapMaxDistanceMax = std::max(fogRemapMaxDistanceMax, fogRemapMaxDistanceMin);
+          fogRemapTransmittanceMeasurementDistanceMax = std::max(fogRemapTransmittanceMeasurementDistanceMax, fogRemapTransmittanceMeasurementDistanceMin);
 
-          float const maxDistanceRange { fogRemapMaxDistanceMaxMeters - fogRemapMaxDistanceMinMeters };
-          float const transmittanceMeasurementDistanceRange { fogRemapTransmittanceMeasurementDistanceMaxMeters - fogRemapTransmittanceMeasurementDistanceMinMeters };
+          float const maxDistanceRange { fogRemapMaxDistanceMax - fogRemapMaxDistanceMin };
+          float const transmittanceMeasurementDistanceRange { fogRemapTransmittanceMeasurementDistanceMax - fogRemapTransmittanceMeasurementDistanceMin };
           // Todo: Scene scale stuff ignored for now because scene scale stuff is not actually functioning properly. Add back in if it's ever fixed.
           // Note: Remap the end fog state distance into renderer units so that options can all be in renderer units (to be consistent with everything else).
-          // float const normalizedRange{ (fogState.end * getSceneScale() - fogRemapMaxDistanceMinMeters) / maxDistanceRange };
-          float const normalizedRange { (fogState.end - fogRemapMaxDistanceMinMeters) / maxDistanceRange };
+          // float const normalizedRange{ (fogState.end * sceneScale() - fogRemapMaxDistanceMin) / maxDistanceRange };
+          float const normalizedRange { (fogState.end - fogRemapMaxDistanceMin) / maxDistanceRange };
 
-          transmittanceMeasurementDistance = normalizedRange * transmittanceMeasurementDistanceRange + fogRemapTransmittanceMeasurementDistanceMinMeters;
+          transmittanceMeasurementDistance = normalizedRange * transmittanceMeasurementDistanceRange + fogRemapTransmittanceMeasurementDistanceMin;
         } else if (fogState.mode == D3DFOG_EXP || fogState.mode == D3DFOG_EXP2) {
           // Note: Derived using the following, doesn't take fog color into account but that is fine for a rough estimate:
           // density = -ln(color) / measurement_distance (For exp)
           // density^2 = -ln(color) / measurement_distance (For exp2)
 
           if (fogState.density != 0.0f) {
-            float const transmittanceColorLuminance { sRGBLuminance(transmittanceColor) };
+            float const transmittanceColorLuminance { sRGBLuminance(transmittanceColorLinear) };
 
             transmittanceMeasurementDistance = -log(transmittanceColorLuminance) / fogState.density;
             // Todo: Scene scale stuff ignored for now because scene scale stuff is not actually functioning properly. Add back in if it's ever fixed.
             // Note: Convert transmittance measurement distance into our engine's units (from game-specific world units due to being derived
             // from the D3D9 side of things). This in effect is the same as dividing the density by the scene scale.
-            // transmittanceMeasurementDistance *= getSceneScale();
+            // transmittanceMeasurementDistance *= sceneScale();
           }
         }
       }
@@ -577,12 +584,12 @@ namespace dxvk {
 
     // Calculate scattering and attenuation coefficients for the volume
 
-    Vector3 const volumetricAttenuationCoefficient {
-      -log(transmittanceColor.x) / transmittanceMeasurementDistance,
-      -log(transmittanceColor.y) / transmittanceMeasurementDistance,
-      -log(transmittanceColor.z) / transmittanceMeasurementDistance
+    Vector3 const volumetricAttenuationCoefficient{
+      -log(transmittanceColorLinear.x) / transmittanceMeasurementDistance,
+      -log(transmittanceColorLinear.y) / transmittanceMeasurementDistance,
+      -log(transmittanceColorLinear.z) / transmittanceMeasurementDistance
     };
-    Vector3 const volumetricScatteringCoefficient { volumetricAttenuationCoefficient * m_singleScatteringAlbedo };
+    Vector3 const volumetricScatteringCoefficient{ volumetricAttenuationCoefficient * singleScatteringAlbedo() };
 
     const RtCamera& mainCamera = cameraManager.getMainCamera();
 
@@ -605,7 +612,7 @@ namespace dxvk {
 
     volumeArgs.maxAccumulationFrames = static_cast<uint16_t>(maxAccumulationFrames());
     volumeArgs.froxelDepthSliceDistributionExponent = froxelDepthSliceDistributionExponent();
-    volumeArgs.froxelMaxDistance = froxelMaxDistanceMeters() * RtxOptions::Get()->getMeterToWorldUnitScale();
+    volumeArgs.froxelMaxDistance = froxelMaxDistanceMeters() * RtxOptions::getMeterToWorldUnitScale();
     volumeArgs.froxelFireflyFilteringLuminanceThreshold = froxelFireflyFilteringLuminanceThreshold();
     volumeArgs.attenuationCoefficient = volumetricAttenuationCoefficient;
     volumeArgs.enable = enable() && canUsePhysicalFog;
@@ -628,22 +635,34 @@ namespace dxvk {
     volumeArgs.volumetricFogAnisotropy = anisotropy();
 
     volumeArgs.enableNoiseFieldDensity = enableHeterogeneousFog();
-    volumeArgs.noiseFieldSubStepSize = noiseFieldSubStepSizeMeters() * RtxOptions::Get()->getMeterToWorldUnitScale();
-    volumeArgs.noiseFieldSpatialFrequency = noiseFieldSpatialFrequency();
+    volumeArgs.noiseFieldSubStepSize = noiseFieldSubStepSizeMeters() * RtxOptions::getMeterToWorldUnitScale();
     volumeArgs.noiseFieldOctaves = noiseFieldOctaves();
+    volumeArgs.noiseFieldTimeScale = noiseFieldTimeScale();
     volumeArgs.noiseFieldDensityScale = noiseFieldDensityScale();
+    volumeArgs.noiseFieldDensityExponent = noiseFieldDensityExponent();
+    volumeArgs.noiseFieldOctaves = noiseFieldOctaves();
+    volumeArgs.noiseFieldInitialFrequency = noiseFieldInitialFrequencyPerMeter() / RtxOptions::getMeterToWorldUnitScale();
+    volumeArgs.noiseFieldLacunarity = noiseFieldLacunarity();
+    volumeArgs.noiseFieldGain = noiseFieldGain();
+
     volumeArgs.depthOffset = depthOffset();
 
     const float invertedWorld = atmosphereInverted() ? -1.f : 1.f;
-
     const Vector3 sceneUpDirection = RtxOptions::zUp() ? Vector3(0, 0, invertedWorld) : Vector3(0, invertedWorld, 0);
+
+    const float atmosphereHeight = atmosphereHeightMeters() * RtxOptions::getMeterToWorldUnitScale();
+    const float planetRadius = atmospherePlanetRadiusMeters() * RtxOptions::getMeterToWorldUnitScale();
+    // Create a virtual planet center by projecting the camera position onto the plane defined by the origin and scene up direction.
+    // Todo: Consider pre-transforming this planet center into the various volume camera translated world spaces to avoid needing to do this translation on the GPU constantly. May be just as costly however
+    // to do an additional indexed lookup rather than a simple subtraction however, but depends on how well the compiler can optimize such things.
+    const Vector3 planetCenter = project(mainCamera.getPosition(), Vector3(), sceneUpDirection) - sceneUpDirection * planetRadius;
+    const float atmosphereRadius = atmosphereHeight + planetRadius;
 
     volumeArgs.enableAtmosphere = enableAtmosphere();
     volumeArgs.sceneUpDirection = sceneUpDirection;
-    volumeArgs.atmosphereHeight = atmosphereHeightMeters() * RtxOptions::Get()->getMeterToWorldUnitScale();
-    // Create a virtual planet center by projecting the camera position onto the plane defined by the origin and scene up direction.
-    volumeArgs.planetCenter = project(mainCamera.getPosition(), Vector3(), sceneUpDirection) - sceneUpDirection * atmospherePlanetRadiusMeters() * RtxOptions::Get()->getMeterToWorldUnitScale();
-    volumeArgs.atmosphereRadius = volumeArgs.atmosphereHeight + atmospherePlanetRadiusMeters() * RtxOptions::Get()->getMeterToWorldUnitScale();
+    volumeArgs.atmosphereHeight = atmosphereHeight;
+    volumeArgs.planetCenter = planetCenter;
+    volumeArgs.atmosphereRadiusSquared = atmosphereRadius * atmosphereRadius;
     volumeArgs.maxAttenuationDistanceForNoAtmosphere = transmittanceMeasurementDistance * 5;
 
     volumeArgs.cameras[froxelVolumeMain] = mainCamera.getVolumeShaderConstants(volumeArgs.froxelMaxDistance);
@@ -715,6 +734,7 @@ namespace dxvk {
     // Compute restir
     {
       ScopedGpuProfileZone(ctx, "Volume Integrate Restir Initial");
+      ctx->setFramePassStage(RtxFramePassStage::VolumeIntegrateRestirInitial);
       VkExtent3D workgroups = util::computeBlockCount(numRestirCellsExtent, VkExtent3D { 16, 8, 1 });
 
       ctx->bindResourceView(VOLUME_INTEGRATE_BINDING_VOLUME_RESERVOIRS_OUTPUT, getCurrentVolumeReservoirs().view, nullptr);
@@ -725,6 +745,7 @@ namespace dxvk {
 
     if(visibilityReuse()) {
       ScopedGpuProfileZone(ctx, "Volume Integrate Restir Visible");
+      ctx->setFramePassStage(RtxFramePassStage::VolumeIntegrateRestirVisible);
       VkExtent3D workgroups = util::computeBlockCount(numRestirCellsExtent, VkExtent3D { 16, 8, 1 });
 
       ctx->bindResourceView(VOLUME_INTEGRATE_BINDING_VOLUME_RESERVOIRS_OUTPUT, getCurrentVolumeReservoirs().view, nullptr);
@@ -735,6 +756,7 @@ namespace dxvk {
 
     {
       ScopedGpuProfileZone(ctx, "Volume Integrate Restir Temporal");
+      ctx->setFramePassStage(RtxFramePassStage::VolumeIntegrateRestirTemporal);
       VkExtent3D workgroups = util::computeBlockCount(numRestirCellsExtent, VkExtent3D { 16, 8, 1 });
 
       ctx->bindResourceView(VOLUME_INTEGRATE_BINDING_PREV_VOLUME_RESERVOIRS_INPUT, getPreviousVolumeReservoirs().view, nullptr);
@@ -746,6 +768,7 @@ namespace dxvk {
 
     {
       ScopedGpuProfileZone(ctx, "Volume Integrate Restir Spatial Resampling");
+      ctx->setFramePassStage(RtxFramePassStage::VolumeIntegrateRestirSpatialResampling);
       VkExtent3D workgroups = util::computeBlockCount(numRestirCellsExtent, VkExtent3D { 16, 8, 1 });
 
       ctx->bindResourceView(VOLUME_INTEGRATE_BINDING_PREV_VOLUME_RESERVOIRS_INPUT, getCurrentVolumeReservoirs().view, nullptr);
@@ -758,6 +781,7 @@ namespace dxvk {
     // Dispatch rays
     {
       ScopedGpuProfileZone(ctx, "Volume Integrate Raytracing");
+      ctx->setFramePassStage(RtxFramePassStage::VolumeIntegrateRaytracing);
       VkExtent3D workgroups = util::computeBlockCount(numRaysExtent, VkExtent3D { 16, 8, 1 });
 
       ctx->bindResourceView(VOLUME_INTEGRATE_BINDING_VOLUME_RESERVOIRS_OUTPUT, getPreviousVolumeReservoirs().view, nullptr);

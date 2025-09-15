@@ -361,9 +361,9 @@ SubsurfaceMaterialInteraction subsurfaceMaterialInteractionCreate(
   SurfaceInteraction surfaceInteraction,
   uint16_t samplerIndex)
 {
-  f16vec4 transmittanceColor;
-  f16vec4 subsurfaceMeasurementDistance;
-  f16vec4 subsurfaceSingleScatteringAlbedo;
+  f16vec4 transmittanceColor = 0.0h;
+  f16vec4 subsurfaceMeasurementDistance = 0.0h;
+  f16vec4 subsurfaceSingleScatteringAlbedo = 0.0h;
 
   bool isDiffusionProfile = subsurfaceMaterial.maxSampleRadius > 0.0f;
 
@@ -390,32 +390,32 @@ SubsurfaceMaterialInteraction subsurfaceMaterialInteractionCreate(
     {
       transmittanceColor = gammaToLinear(transmittanceColor);
     }
-    subsurfaceMaterialInteraction.packedTransmittanceColor = colorToR5G6B5(transmittanceColor.rgb);
   }
   else
   {
     if (!isDiffusionProfile) // Thin Opaque
     {
-      subsurfaceMaterialInteraction.packedTransmittanceColor = colorToR5G6B5(evalBeerLambertAttenuation(subsurfaceMaterial.volumetricAttenuationCoefficient, subsurfaceMaterial.measurementDistance));
+      transmittanceColor.rgb = evalBeerLambertAttenuation(subsurfaceMaterial.volumetricAttenuationCoefficient, subsurfaceMaterial.measurementDistance);
     }
     else // SSS
     {
-      subsurfaceMaterialInteraction.packedTransmittanceColor = colorToR5G6B5(subsurfaceMaterial.volumetricAttenuationCoefficient);
+      transmittanceColor.rgb = subsurfaceMaterial.volumetricAttenuationCoefficient;
     }
   }
+  subsurfaceMaterialInteraction.packedTransmittanceColor = colorToR11G11B10(transmittanceColor.rgb);
 
   if (singleScatteringAlbedoLoaded)
   {
-    subsurfaceMaterialInteraction.singleScatteringAlbedo = subsurfaceSingleScatteringAlbedo.rgb;
+    subsurfaceMaterialInteraction.packedSingleScatteringAlbedo = colorToR11G11B10(subsurfaceSingleScatteringAlbedo.rgb);
   }
   else
   {
-    subsurfaceMaterialInteraction.singleScatteringAlbedo = subsurfaceMaterial.singleScatteringAlbedo;
+    subsurfaceMaterialInteraction.packedSingleScatteringAlbedo = colorToR11G11B10(subsurfaceMaterial.singleScatteringAlbedo);
   }
 
   subsurfaceMaterialInteraction.volumetricAnisotropy = f16ToSnorm8(subsurfaceMaterial.volumetricAnisotropy);
 
-  subsurfaceMaterialInteraction.maxSampleRadius = float16BitsToUint16(subsurfaceMaterial.maxSampleRadius);
+  subsurfaceMaterialInteraction.maxSampleRadius = subsurfaceMaterial.maxSampleRadius != 0.0h ? f16ToUnorm8(max(subsurfaceMaterial.maxSampleRadius, materialSssEpsilon)) : 0;
 
   return subsurfaceMaterialInteraction;
 }
@@ -547,12 +547,51 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
   const bool roughnessLoaded = surfaceMaterialInteractionTextureReadHelper(opaqueSurfaceMaterial.roughnessTextureIndex, opaqueSurfaceMaterial.samplerIndex, surfaceInteraction, roughnessSample);
   const bool metallicLoaded = surfaceMaterialInteractionTextureReadHelper(opaqueSurfaceMaterial.metallicTextureIndex, opaqueSurfaceMaterial.samplerIndex, surfaceInteraction, metallicSample);
   const bool emissiveColorLoaded = surfaceMaterialInteractionTextureReadHelper(opaqueSurfaceMaterial.emissiveColorTextureIndex, opaqueSurfaceMaterial.samplerIndex, surfaceInteraction, emissiveColorSample);
+  
+  // Load Emissive Color
 
+  f16vec3 emissiveColor = opaqueSurfaceMaterial.emissiveColorConstant;
+
+  if (emissiveColorLoaded)
+  {
+    emissiveColor = emissiveColorSample.xyz;
+
+    // Apply alpha masking for Legacy Emissive materials
+    if (opaqueSurfaceMaterial.flags & OPAQUE_SURFACE_MATERIAL_FLAG_EMISSIVE_ALPHA_MASK)
+    {
+      // Use alpha channel to modulate emissive intensity
+      float16_t alphaMask = emissiveColorSample.a;
+      
+      // Apply alpha inversion if requested (flips the meaning: black alpha = full emission, white alpha = no emission)
+      if (opaqueSurfaceMaterial.flags & OPAQUE_SURFACE_MATERIAL_FLAG_EMISSIVE_ALPHA_INVERT)
+      {
+        alphaMask = float16_t(1.0) - alphaMask;
+      }
+      
+      // Apply masking with smart energy compensation to prevent reflectivity dominance
+      // Only apply minimum emissive strength in the "danger zone" where reflectivity would dominate
+      float16_t emissiveMask;
+      if (alphaMask < float16_t(0.05)) // Very low alpha - allow true zero emission
+      {
+        emissiveMask = float16_t(0.0);
+      }
+      else if (alphaMask < float16_t(0.3)) // Danger zone - apply minimum to prevent reflectivity dominance
+      {
+        emissiveMask = max(alphaMask, float16_t(0.15)); // Higher minimum in danger zone
+      }
+      else // High alpha - use original masking
+      {
+        emissiveMask = alphaMask;
+      }
+      emissiveColor *= emissiveMask;
+    }
+  }
+  
   // Load Albedo/Opacity
 
   f16vec3 albedo = opaqueSurfaceMaterial.albedoOpacityConstant.rgb;
   float16_t opacity = opaqueSurfaceMaterial.albedoOpacityConstant.a;
-  float16_t emissiveBlendOverrideInfluence = float16_t(0.0f);
+  float16_t emissiveBlendOverrideInfluence = float16_t(1.0f);
   float16_t thinFilmThickness = float16_t(0.0f);
 
   // Baked terrain is the only surface using cascaded view positions, so key off of that
@@ -606,7 +645,7 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
 
 #endif
 
-  f16vec4 tFactor = 0.h;
+  f16vec4 tFactor = unorm4x8ToFloat4x16(surface.tFactor).bgra;
 
   // WAR for REMIX-1573: texture ops for opacity should happen during baking and be skipped here for baked terrain,
   // but right now the opacity is not 1 in the baked texture where it is expected to be and thus texture ops
@@ -615,52 +654,17 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
   if (applyTextureOperations) 
 #endif
   {
-    // Adjust opacity via texture operations.
-    // Fixed function texture stage state for alpha channel
-
-    float16_t textureAlphaArg1, textureAlphaArg2;
-
-    // Note: Custom decoding done here rather than using our usual unorm to f16 decoding functions to match encoding
-    // based on D3D9's texture factor encoding for a more exact representation.
-    tFactor.a = float16_t((surface.tFactor >> 24) & 0xff) / 255.0h;
-    tFactor.r = float16_t((surface.tFactor >> 16) & 0xff) / 255.0h;
-    tFactor.g = float16_t((surface.tFactor >> 8)  & 0xff) / 255.0h;
-    tFactor.b = float16_t((surface.tFactor)       & 0xff) / 255.0h;
-
-    chooseTextureArgument(textureAlphaArg1, surface.textureAlphaArg1Source, opacity, surfaceInteraction.vertexColor.a, tFactor.a, opacity);
-    chooseTextureArgument(textureAlphaArg2, surface.textureAlphaArg2Source, opacity, surfaceInteraction.vertexColor.a, tFactor.a, float16_t(1.0h));
-    chooseTextureOperationAlpha(opacity, surface.textureAlphaOperation, textureAlphaArg1, textureAlphaArg2);
-  
-    calcOpaqueSurfaceMaterialOpacity(
-      albedo, opacity, surface, opacity, emissiveBlendOverrideInfluence);
-  }
-
-  if (opaqueSurfaceMaterial.flags & OPAQUE_SURFACE_MATERIAL_FLAG_IGNORE_ALPHA_CHANNEL)
-  {
-      opacity = 1.h;
-  }
-
-  // Note: Gamma correct albedo input (be it from a constant or a texture). Currently assuming all textures are not using sRGB formats which
-  // automatically do this conversion.
-  // This conversion is done *after* calcOpaqueSurfaceMaterialOpacity to correctly apply double multiplicative blending.
-  // Todo: Disable this for when a sRGB texture is the source of the albedo.
-  albedo = gammaToLinear(albedo);
-
-  // Apply vertex color via texture operations
-  if (applyTextureOperations)
-  {
-    // "Normalize" vertex color to remove lighting contribution in different vertices.
-    // We assume the diffuse term contributes most lighting. Therefore, vertex color = diffuseColor * (N*L).
-    // By dividing the vertex color by its largest component, the result is irrelavant to N*L, but proportional to the 
-    // original diffuse color, which is more desired.
-    // In practice, we add an adjustable blending factor to avoid extreme cases.
-    surfaceInteraction.vertexColor.rgb = max(surfaceInteraction.vertexColor.rgb, f16vec3(1.0 / 255.0));
-    float16_t maxColor = max(surfaceInteraction.vertexColor.r, max(surfaceInteraction.vertexColor.g, surfaceInteraction.vertexColor.b));
-    surfaceInteraction.vertexColor.rgb /= maxColor;
-    surfaceInteraction.vertexColor.rgb = mix(f16vec3(1), surfaceInteraction.vertexColor.rgb, float16_t(cb.vertexColorStrength));
-
-    // Note: Gamma correct vertex color input.
-    surfaceInteraction.vertexColor.rgb = gammaToLinear(surfaceInteraction.vertexColor.rgb);
+    if (surface.isVertexColorBakedLighting) {
+      // "Normalize" vertex color to remove lighting contribution in different vertices.
+      // We assume the diffuse term contributes most lighting. Therefore, vertex color = diffuseColor * (N*L).
+      // By dividing the vertex color by its largest component, the result is irrelavant to N*L, but proportional to the 
+      // original diffuse color, which is more desired.
+      // In practice, we add an adjustable blending factor to avoid extreme cases.
+      surfaceInteraction.vertexColor.rgb = max(surfaceInteraction.vertexColor.rgb, f16vec3(1.0 / 255.0));
+      float16_t maxColor = max(surfaceInteraction.vertexColor.r, max(surfaceInteraction.vertexColor.g, surfaceInteraction.vertexColor.b));
+      surfaceInteraction.vertexColor.rgb /= maxColor;
+      surfaceInteraction.vertexColor.rgb = mix(f16vec3(1), surfaceInteraction.vertexColor.rgb, float16_t(cb.vertexColorStrength));
+    }
 
     // Fixed function texture stage setting
     f16vec3 textureArg1 = f16vec3(1.0), textureArg2 = f16vec3(1.0);
@@ -670,13 +674,50 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
     if (surface.isTextureFactorBlend) {
       albedo *= tFactor.rgb;
     }
+
+    // Fixed function texture stage setting (emissive)
+    chooseTextureArgument(textureArg1, surface.textureColorArg1Source, emissiveColor, surfaceInteraction.vertexColor.rgb, tFactor.rgb, f16vec3(1.0));
+    chooseTextureArgument(textureArg2, surface.textureColorArg2Source, emissiveColor, surfaceInteraction.vertexColor.rgb, tFactor.rgb, f16vec3(1.0));
+    chooseTextureOperationColor(emissiveColor, surface.textureColorOperation, textureArg1, textureArg2);
+    if (surface.isTextureFactorBlend) {
+      emissiveColor *= tFactor.rgb;
+    }
+    
+    // Adjust opacity via texture operations.
+    // Fixed function texture stage state for alpha channel
+
+    float16_t textureAlphaArg1, textureAlphaArg2;
+    chooseTextureArgument(textureAlphaArg1, surface.textureAlphaArg1Source, opacity, surfaceInteraction.vertexColor.a, tFactor.a, opacity);
+    chooseTextureArgument(textureAlphaArg2, surface.textureAlphaArg2Source, opacity, surfaceInteraction.vertexColor.a, tFactor.a, float16_t(1.0h));
+    chooseTextureOperationAlpha(opacity, surface.textureAlphaOperation, textureAlphaArg1, textureAlphaArg2);
+    
+    // Ensure we perform these opacity calculations after the texture operations have been applied to abledo and alpha.
+    calcOpaqueSurfaceMaterialOpacity(
+      albedo, opacity, surface, opacity, emissiveBlendOverrideInfluence, cb.wboitEnabled);
   }
+
+  if (opaqueSurfaceMaterial.flags & OPAQUE_SURFACE_MATERIAL_FLAG_IGNORE_ALPHA_CHANNEL)
+  {
+    opacity = 1.h;
+  }
+  
+  // Note: Gamma correct albedo input (be it from a constant or a texture). Currently assuming all textures are not using sRGB formats which
+  // automatically do this conversion.
+  // Todo: Disable this for when a sRGB texture is the source of the albedo.
+  albedo = gammaToLinear(albedo);
+  
+  // Note: Gamma correct emissive color input (be it from a constant or a texture). Currently assuming all textures are not using sRGB formats which
+  // automatically do this conversion.
+  // Todo: Disable this for when a sRGB texture is the source of the emissive color.
+  emissiveColor = gammaToLinear(emissiveColor);
+  
+  // Apply emissive color tint for Legacy Emissive materials (after texture operations)
+  emissiveColor *= opaqueSurfaceMaterial.emissiveColorTint;
 
   // Apply material modifiers/overrides
   albedo = saturate(albedo * cb.opaqueMaterialArgs.albedoScale + cb.opaqueMaterialArgs.albedoBias);
-
-  //if (cb.opaqueMaterialArgs.enableThinFilmOverride)
-  //{
+  if (cb.opaqueMaterialArgs.enableThinFilmOverride)
+  {
     // Note: Thickness override is already normalized to the proper 0-1 range by the CPU to match how the albedo texture alpha channel encodes thickness.
   //  thinFilmThickness = cb.opaqueMaterialArgs.thinFilmNormalizedThicknessOverride;
   //}
@@ -788,10 +829,6 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
 
   // Transform to desired Opaque Material Interaction values
 
-  // Note: Store a copy of the original albedo value so that operations later can use it rather than working off of the adjusted albedo
-  // (which will not look correct on materials with weird blend modes that do things like invert alpha).
-  const f16vec3 originalAlbedo = albedo;
-
   opaqueSurfaceMaterialInteraction.shadingNormal = getBentNormal(surfaceInteraction.triangleNormal, normal, -minimalRayInteraction.viewDirection);
   opaqueSurfaceMaterialInteraction.normalDetail = normalDetail;
   // Todo: Shading tangent/bitangent for anisotropy?
@@ -846,7 +883,8 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
 
   derivedEmissiveIntensity *= uint16BitsToHalf(cb.emissiveIntensity); // Note: Global emissive intensity scalar on top of everything else.
 
-  opaqueSurfaceMaterialInteraction.emissiveRadiance = derivedEmissiveColor * derivedEmissiveIntensity;
+  opaqueSurfaceMaterialInteraction.emissiveRadiance = emissiveBlendOverrideInfluence * emissiveColor * opaqueSurfaceMaterial.emissiveIntensity;
+
 
   opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction =
     subSurfaceMaterialReadHelper(opaqueSurfaceMaterial.subsurfaceMaterialIndex, surfaceInteraction, opaqueSurfaceMaterial.samplerIndex);
@@ -883,9 +921,9 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(Polymorp
   opaqueSurfaceMaterialInteraction.normalDetail = polymorphicSurfaceMaterialInteraction.fdata4;
   opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.measurementDistance = polymorphicSurfaceMaterialInteraction.fdata5;
   opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.volumetricAnisotropy = polymorphicSurfaceMaterialInteraction.bdata1;
-  opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.maxSampleRadius = polymorphicSurfaceMaterialInteraction.idata1;
-  opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.packedTransmittanceColor = polymorphicSurfaceMaterialInteraction.idata0;
-  opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.singleScatteringAlbedo = polymorphicSurfaceMaterialInteraction.vdata2;
+  opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.maxSampleRadius = polymorphicSurfaceMaterialInteraction.bdata2;
+  opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.packedTransmittanceColor = polymorphicSurfaceMaterialInteraction.i32data0;
+  opaqueSurfaceMaterialInteraction.subsurfaceMaterialInteraction.packedSingleScatteringAlbedo = polymorphicSurfaceMaterialInteraction.i32data1;
 
   opaqueSurfaceMaterialInteraction.flags = polymorphicSurfaceMaterialInteraction.bdata0;
 
@@ -1171,7 +1209,9 @@ SurfaceMaterialInteractionSample opaqueSurfaceMaterialInteractionCalcDiffuseRefl
     evalHammonDiffuse(opaqueSurfaceMaterialInteraction.albedo, opaqueSurfaceMaterialInteraction.isotropicRoughness,
       inputDirectionDotOutputDirection, normalDotInputDirection,
       normalDotOutputDirection, normalDotMicrofacetNormal) * lambertTransmissionWeight;
-  const f16vec3 throughput = safePositiveDivide(weight, f16vec3(cosineHemisphereSolidAnglePdf), materialEpsilon) * normalDotInputDirection;
+  const f16vec3 throughput =
+    saferPositiveDivide(weight, f16vec3(cosineHemisphereSolidAnglePdf), materialEpsilon, materialMaximum) *
+    normalDotInputDirection;
 
   // Return the material sample
 
@@ -1297,7 +1337,7 @@ SurfaceMaterialInteractionSample opaqueSurfaceMaterialInteractionCalcSpecularRef
     opaqueSurfaceMaterialInteraction.anisotropicRoughness,
     tangentDotOutputDirection, bitangentDotOutputDirection, normalDotOutputDirection,
     k);
-  const float16_t G2OverG1 = safePositiveDivide(G2, G1, materialEpsilon);
+  const float16_t G2OverG1 = saferPositiveDivide(G2, G1, materialEpsilon, materialMaximum);
 #else
   // Note: Algebraic simplification of height correlated G2/G1 to reduce evaluation cost. Could be simplified a bit further
   // I think however by calculating lambda for the input/output directions and evaluating (1 + L(O)) / (1 + L(O) + L(I)) as

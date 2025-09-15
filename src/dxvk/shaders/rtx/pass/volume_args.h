@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+* Copyright (c) 2022-2025, NVIDIA CORPORATION. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -19,8 +19,7 @@
 * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 * DEALINGS IN THE SOFTWARE.
 */
-#ifndef VOLUME_ARGS_H
-#define VOLUME_ARGS_H
+#pragma once
 
 #include "rtx/utility/shader_types.h"
 
@@ -78,27 +77,34 @@ struct VolumeArgs {
   float volumetricFogAnisotropy;
   uint16_t enableNoiseFieldDensity;
   uint16_t enableAtmosphere;
-  float noiseFieldSubStepSize;
-
-  float noiseFieldSpatialFrequency;
-  uint noiseFieldOctaves;
-  float noiseFieldDensityScale;
   float depthOffset;
+
+  float noiseFieldSubStepSize;
+  uint noiseFieldOctaves;
+  // Note: When set to 0 this indicates that no time modulation of the noise field should be used.
+  // Otherwise, scales the time modulation in noise coordinates per second.
+  float noiseFieldTimeScale;
+  float noiseFieldDensityScale;
+
+  float noiseFieldDensityExponent;
+  float noiseFieldInitialFrequency;
+  float noiseFieldLacunarity;
+  float noiseFieldGain;
 
   vec3 sceneUpDirection;
   float atmosphereHeight;
 
   vec3 planetCenter;
-  float atmosphereRadius;
+  // Note: Squared radius used as most functions involving atmospheric intersection use a squared radius
+  // in their math, simplifying the work that needs to be done on the GPU.
+  float atmosphereRadiusSquared;
 
-  vec2 pad;
   float maxAttenuationDistanceForNoAtmosphere;
   uint resetHistory;
+  vec2 pad0;
 };
 
 #ifdef __cplusplus
 // We're packing these into a constant buffer (see: raytrace_args.h), so need to remain aligned
 static_assert((sizeof(VolumeArgs) & 15) == 0);
-#endif
-
 #endif

@@ -56,6 +56,7 @@ class AccelManager : public CommonDeviceObject {
     VkGeometryInstanceFlagsKHR instanceFlags = 0;
     bool usesUnorderedApproximations = false;
     uint32_t reorderedSurfacesOffset = UINT32_MAX;
+    bool hasOmmInstances = false;
     
     // Tries to add a geometry instance to the bucket. The addition is successful if either:
     //   a) the bucket is empty,
@@ -100,7 +101,7 @@ public:
   // and some other BLAS will be dedicated to instances with static geometries.
   void mergeInstancesIntoBlas(Rc<DxvkContext> ctx, class DxvkBarrierSet& execBarriers,
                               const std::vector<TextureRef>& textures, const CameraManager& cameraManager, 
-                              InstanceManager& instanceManager, OpacityMicromapManager* opacityMicromapManager, float frameTimeMilliseconds);
+                              InstanceManager& instanceManager, OpacityMicromapManager* opacityMicromapManager);
 
   void buildTlas(Rc<DxvkContext> ctx);
 
@@ -135,7 +136,6 @@ private:
                    const std::vector<std::unique_ptr<BlasBucket>>& blasBuckets, 
                    std::vector<VkAccelerationStructureBuildGeometryInfoKHR>& blasToBuild,
                    std::vector<VkAccelerationStructureBuildRangeInfoKHR*>& blasRangesToBuild,
-                   float elapsedTime,
                    size_t& currentScratchOffset);
   void addBlas(RtInstance* instance, BlasEntry* blasEntry, const Matrix4* instanceToObject);
   void createBlasBuffersAndInstances(Rc<DxvkContext> ctx, 
@@ -147,6 +147,8 @@ private:
   void internalBuildTlas(Rc<DxvkContext> ctx, size_t& totalScratchSize);
 
   void buildParticleSurfaceMapping(std::vector<uint32_t>& surfaceIndexMapping);
+
+  bool validateUpdateMode(const VkAccelerationStructureBuildGeometryInfoKHR& oldInfo, const VkAccelerationStructureBuildGeometryInfoKHR& newInfo);
 
   std::vector<RtInstance*> m_reorderedSurfaces;
   std::vector<uint32_t> m_reorderedSurfacesFirstIndexOffset;

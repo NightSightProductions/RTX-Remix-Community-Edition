@@ -33,6 +33,8 @@
 #include <pxr/base/arch/math.h>
 #include "rtx_imgui.h"
 
+#include "../util/util_globaltime.h"
+
 namespace dxvk {
   std::array<uint8_t, 3> g_customHighlightColor = { 118, 185, 0 };
 
@@ -249,6 +251,7 @@ namespace dxvk {
     }
 
     ScopedGpuProfileZone(ctx, "PostFx");
+    ctx->setFramePassStage(RtxFramePassStage::PostFX);
 
     // Simulate chromatic aberration offset scale by calculating the focal length differences of 3 Fraunhofer lines,
     // the wavelength of these lines are used for measuring chromatic aberrations
@@ -378,7 +381,6 @@ namespace dxvk {
 
     const Resources::Resource& inOutColorTexture = rtOutput.m_compositeOutput.resource(Resources::AccessType::ReadWrite);
     const VkExtent3D& inputSize = inOutColorTexture.image->info().extent;
-    const float timeSinceStartMS = static_cast<float>(ctx->getSceneManager().getGameTimeSinceStartMS());
 
     const auto workgroups = util::computeBlockCount(inputSize, VkExtent3D { POST_FX_TILE_SIZE , POST_FX_TILE_SIZE, 1 });
 
@@ -427,7 +429,7 @@ namespace dxvk {
     {
       args.imageSize = { inputSize.width, inputSize.height };
       args.desaturateNonHighlighted = desaturateOthersOnHighlight() ? 1 : 0;
-      args.timeSinceStartMS = timeSinceStartMS;
+      args.timeSinceStartMS = (float)GlobalTime::get().absoluteTimeMs();
       args.pixel = pixelToHighlight ? int2 { pixelToHighlight->x, pixelToHighlight->y } : int2 { -1, -1 };
       args.highlightColorPacked =
         color == HighlightColor::World ? packColor(118, 185, 0) :

@@ -389,7 +389,7 @@ namespace dxvk {
                                         VkAccelerationStructureGeometryKHR& targetGeometry, const InstanceManager& instanceManager);
 
     // Called once per frame to build pending Opacity Micromap items in Opacity Micromap Manager
-    void buildOpacityMicromaps(Rc<DxvkContext> ctx, const std::vector<TextureRef>& textures, uint32_t lastCameraCutFrameId, float frameTimeMilliseconds);
+    void buildOpacityMicromaps(Rc<DxvkContext> ctx, const std::vector<TextureRef>& textures, uint32_t lastCameraCutFrameId);
 
     // Called once per frame before any calls to Opacity Micromap Manager
     void onFrameStart(Rc<DxvkContext> ctx);
@@ -493,7 +493,7 @@ namespace dxvk {
     // Called whenever a new instance has been added to the database
     void onInstanceAdded(const RtInstance& instance);
     // Called whenever instance metadata is updated
-    void onInstanceUpdated(const RtInstance& instance, const RtSurfaceMaterial& material, const bool hasTransformChanged, const bool hasVerticesChanged);
+    void onInstanceUpdated(const RtInstance& instance, const DrawCallState& drawCall, const MaterialData& material, const bool hasTransformChanged, const bool hasVerticesChanged, const bool isFirstUpdateThisFrame);
     // Called whenever an instance has been removed from the database
     void onInstanceDestroyed(const RtInstance& instance);
 
