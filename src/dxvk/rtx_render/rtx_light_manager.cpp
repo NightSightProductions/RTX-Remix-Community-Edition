@@ -275,7 +275,8 @@ namespace dxvk {
           it->second.getPrimInstanceOwner().setReplacementInstance(nullptr, ReplacementInstance::kInvalidReplacementIndex, &it->second, PrimInstance::Type::Light);
           m_externalLights.erase(it);
         }
-        m_externalLights.emplace(upd.first, upd.second);
+        auto [it_new, success] = m_externalLights.emplace(upd.first, upd.second);
+        it_new->second.setFrameLastTouched(m_device->getCurrentFrameId());
       }
       m_pendingExternalLightUpdates.clear();
 
