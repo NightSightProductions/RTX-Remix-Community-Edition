@@ -609,8 +609,6 @@ dxvkrt_output_targets = {
   'unit_test': '',
 }
 
-subdir('tests/rtx')
-
 if dxvk_is_ninja
   # this is how we force meson to reconfigure when external files change
   # (meson does not do globbing)
@@ -802,7 +800,3 @@ if dxvk_is_ninja
     error('generate_vs_project_files failed')
   endif
 endif # dxvk_is_ninja
-
-if fs.is_dir('nv-private')
-  subdir('nv-private')
-endif
