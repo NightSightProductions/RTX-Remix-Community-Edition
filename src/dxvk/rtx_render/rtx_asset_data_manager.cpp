@@ -520,48 +520,46 @@ namespace dxvk {
   }
 
   void AssetDataManager::addSearchPath(uint32_t priority, const std::filesystem::path& path) {
-    // Make base path preferred and lowercase
-    auto searchPath = std::filesystem::absolute(path).make_preferred().string();
-    std::for_each(searchPath.begin(), searchPath.end(), [](char& c) { c = tolower(c); });
-
-    if (searchPath.back() != '\\' && searchPath.back() != '/') {
-      searchPath.push_back('\\');
+    // Normalize base path: absolute, preferred separators, lowercase, ensure trailing separator
+    auto normalized = std::filesystem::absolute(path).make_preferred().string();
+    std::for_each(normalized.begin(), normalized.end(), [](char& c) { c = tolower(c); });
+    if (!normalized.empty() && normalized.back() != '\\' && normalized.back() != '/') {
+      normalized.push_back('\\');
     }
 
-    for (const auto& [p, curSearchPath] : m_searchPaths) {
-      if (curSearchPath == searchPath) {
-        // We already have this path - bail out
-        return;
+    // Global dedupe across all priorities
+    for (const auto& pr : m_searchPaths) {
+      for (const auto& existing : pr.second) {
+        if (existing == normalized) {
+          return;
+        }
       }
     }
 
-    if (m_searchPaths.count(priority) > 0) {
-      Logger::warn(str::format("Overriding asset search path from: ",
-                               m_searchPaths[priority], " to: ", searchPath));
-    } else {
-      Logger::info(str::format("Adding asset search path: ", searchPath));
-    }
+    Logger::info(str::format("Adding asset search path: ", normalized));
 
-    m_searchPaths[priority] = searchPath;
+    // Record search path for this priority; newest paths should be searched first within the priority
+    m_searchPaths[priority].push_back(normalized);
 
-    // Find the packages
+    // Find and mount packages for this path
     if (RtxIo::enabled()) {
       PackageSet packageSet;
-      for (const auto& entry : std::filesystem::directory_iterator(path)) {
-        if (entry.path().extension() == ".pkg" || entry.path().extension() == ".rtxio") {
-          const auto packagePath = entry.path().string();
-          // Try to initialize the replacements packages
-          Rc<AssetPackage> package = new AssetPackage(packagePath);
-          if (package->initialize()) {
-            packageSet.emplace(packagePath, std::move(package));
-            Logger::info(str::format("Mounted a package at: ", entry.path()));
-          } else {
-            Logger::warn(str::format("Corrupted package discovered at: ", entry.path()));
+      if (std::filesystem::exists(path)) {
+        for (const auto& entry : std::filesystem::directory_iterator(path)) {
+          auto ext = entry.path().extension();
+          if (ext == ".pkg" || ext == ".rtxio") {
+            const auto packagePath = entry.path().string();
+            Rc<AssetPackage> package = new AssetPackage(packagePath);
+            if (package->initialize()) {
+              packageSet.emplace(packagePath, std::move(package));
+              Logger::info(str::format("Mounted a package at: ", entry.path()));
+            } else {
+              Logger::warn(str::format("Corrupted package discovered at: ", entry.path()));
+            }
           }
         }
       }
-      m_packageSets.emplace(std::piecewise_construct, std::forward_as_tuple(priority),
-        std::forward_as_tuple(searchPath, std::move(packageSet)));
+      m_packageSets[priority].emplace_back(normalized, std::move(packageSet));
     }
   }
 
@@ -591,21 +589,27 @@ namespace dxvk {
     }
 
     if (RtxIo::enabled() && !m_packageSets.empty()) {
-      // Iterate package sets in search priority order
-      for (auto itBase = m_packageSets.rbegin(); itBase != m_packageSets.rend(); ++itBase) {
-        const auto& basePath = std::get<0>(itBase->second);
+      // Build a normalized lowercase version of the filename with preferred separators
+      std::string filenameLower = std::filesystem::absolute(filename).make_preferred().string();
+      std::for_each(filenameLower.begin(), filenameLower.end(), [](char& c) { c = tolower(c); });
 
-        // The base path is shorter - we can try to use it
-        if (basePath.length() < filename.length()) {
-          const std::string relativePath = filename.substr(basePath.length());
+      // Iterate priorities from highest to lowest
+      for (auto prIt = m_packageSets.rbegin(); prIt != m_packageSets.rend(); ++prIt) {
+        const auto& entries = prIt->second; // vector<PackageEntry>
+        // Search later-added paths first within the same priority
+        for (auto entIt = entries.rbegin(); entIt != entries.rend(); ++entIt) {
+          const std::string& basePath = entIt->first;
+          // Require strict prefix match on normalized lowercase
+          if (filenameLower.size() > basePath.size() && filenameLower.rfind(basePath, 0) == 0) {
+            const std::string relativePath = filename.substr(basePath.size());
 
-          auto& packages = std::get<1>(itBase->second);
-
-          // Iterate package set in reverse alphabetical order
-          for (auto it = packages.rbegin(); it != packages.rend(); ++it) {
-            uint32_t assetIdx = it->second->findAsset(relativePath);
-            if (AssetPackage::kNoAssetIdx != assetIdx) {
-              return new PackagedAssetData(it->second, assetIdx);
+            const auto& packages = entIt->second; // map<string, Rc<AssetPackage>>
+            // Iterate package set in reverse alphabetical order to prefer later packages
+            for (auto pkgIt = packages.rbegin(); pkgIt != packages.rend(); ++pkgIt) {
+              uint32_t assetIdx = pkgIt->second->findAsset(relativePath);
+              if (AssetPackage::kNoAssetIdx != assetIdx) {
+                return new PackagedAssetData(pkgIt->second, assetIdx);
+              }
             }
           }
         }

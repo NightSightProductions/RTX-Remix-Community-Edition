@@ -35,8 +35,11 @@ namespace dxvk {
   // the access to actual data.
   class AssetDataManager : public Singleton<AssetDataManager> {
     using PackageSet = std::map<std::string, Rc<AssetPackage>>;
-    std::map<uint32_t, std::tuple<std::string, PackageSet>> m_packageSets;
-    std::map<uint32_t, std::string> m_searchPaths;
+    using PackageEntry = std::pair<std::string, PackageSet>; // basePath (lowercased, with trailing separator), mounted packages at that base
+    // Multiple search paths may share the same priority; higher priorities are searched first,
+    // and within the same priority, later added paths are searched first.
+    std::map<uint32_t, std::vector<PackageEntry>> m_packageSets;
+    std::map<uint32_t, std::vector<std::string>> m_searchPaths;
   public:
     AssetDataManager();
     ~AssetDataManager();
