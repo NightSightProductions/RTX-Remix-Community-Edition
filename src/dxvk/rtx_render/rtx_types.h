@@ -562,6 +562,7 @@ enum class InstanceCategories : uint32_t {
   IgnoreBakedLighting,
   IgnoreTransparencyLayer,
   ParticleEmitter,
+  LegacyEmissive,
 
   Count,
 };
@@ -923,6 +924,7 @@ enum class RtxFramePassStage {
   DLSS,
   DLSSRR,
   NIS,
+  XeSS,
   TAA,
   DustParticles,
   Bloom,
