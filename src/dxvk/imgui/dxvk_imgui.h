@@ -222,6 +222,9 @@ namespace dxvk {
     void showEnhancementsTab(const Rc<DxvkContext>& ctx);
     void showDevelopmentSettings(const Rc<DxvkContext>& ctx);
 
+    // Light Editor
+    void showLightEditorWindow(const Rc<DxvkContext>& ctx);
+
     // helper to display a configurable grid of all textures currently hooked to ImGUI
     void showTextureSelectionGrid(const Rc<DxvkContext>& ctx, const char* uniqueId, const uint32_t texturesPerRow, const float thumbnailSize, const float minChildHeight = 600.0f);
 
@@ -252,6 +255,33 @@ namespace dxvk {
     void onCloseMenus();
     void onOpenMenus();
     void freeUnusedMemory();
+
+    struct LightEditorState {
+      bool open = false;
+      // Selection
+      bool pickingRequested = false;
+      bool pickingAwaitClick = false;
+      uint32_t lastPickingValue = 0;
+      uint64_t anchorInstanceId = 0; // 0 = none
+      Vector3 anchorPositionWS = Vector3(0.0f, 0.0f, 0.0f);
+      int anchorHighlightFrames = 0; // highlight countdown
+      // Active light (externally tracked)
+      dxvk::RtLight* activeLight = nullptr;
+      // Editable properties
+      Vector3 radiance = Vector3(1.0f, 1.0f, 1.0f);
+      float radius = 2.0f;
+      float volumetricScale = 1.0f;
+      bool shapingEnabled = false;
+      Vector3 shapingDirection = Vector3(0.0f, 0.0f, 1.0f);
+      float shapingConeAngleDeg = 0.0f; // degrees
+      float shapingConeSoftness = 0.0f;
+      float shapingFocusExponent = 0.0f;
+      // Gizmo
+      bool gizmoActive = false;
+      int gizmoAxis = -1; // 0=X,1=Y,2=Z
+      ImVec2 gizmoGrabMousePos = ImVec2(0,0);
+      Vector3 gizmoStartPosWS = Vector3(0.0f, 0.0f, 0.0f);
+    } m_lightEditor;
   };
   
 }

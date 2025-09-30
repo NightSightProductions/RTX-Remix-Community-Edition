@@ -64,6 +64,7 @@
 #include "../../d3d9/d3d9_rtx.h"
 #include "dxvk_memory_tracker.h"
 #include "rtx_render/rtx_particle_system.h"
+#include "rtx_render/rtx_lights.h"
 
 
 namespace dxvk {
@@ -2772,6 +2773,14 @@ namespace dxvk {
     ImGui::Checkbox("Highlight Legacy Meshes with Shared Vertex Buffers (dull purple)", &RtxOptions::useHighlightUnsafeAnchorModeObject());
     ImGui::Checkbox("Highlight Replacements with Unstable Anchors (flash red)", &RtxOptions::useHighlightUnsafeReplacementModeObject());
 
+    // Light Editor toggle
+    if (ImGui::Button(m_lightEditor.open ? "Close Light Editor" : "Open Light Editor")) {
+      m_lightEditor.open = !m_lightEditor.open;
+    }
+    if (m_lightEditor.open) {
+      showLightEditorWindow(ctx);
+    }
+
     // Display loaded USD files
     ImGui::Separator();
     if (ImGui::CollapsingHeader("Loaded USD Files")) {
@@ -2963,6 +2972,278 @@ namespace dxvk {
       }
     }
 
+  }
+
+  static ImU32 axisColor(int axis) {
+    switch (axis) {
+    case 0: return IM_COL32(255, 80, 80, 255); // X - red
+    case 1: return IM_COL32(80, 255, 80, 255); // Y - green
+    case 2: return IM_COL32(80, 160, 255, 255); // Z - blue
+    default: return IM_COL32_WHITE;
+    }
+  }
+
+  // Local helper: project world position to screen space
+  static bool transformToScreen(const Matrix4& worldToProj, const Vector2 screen, const Vector3 worldPos, ImVec2& outScreenPos) {
+    Vector4 positionPS = worldToProj * Vector4(worldPos.x, worldPos.y, worldPos.z, 1.f);
+    positionPS.xyz() /= std::abs(positionPS.w);
+    outScreenPos = { (positionPS.x * 0.5f + 0.5f) * screen.x, (-positionPS.y * 0.5f + 0.5f) * screen.y };
+    return !(positionPS.x < -1.f || positionPS.y < -1.f || positionPS.x > 1.f || positionPS.y > 1.f || positionPS.w < 0.f);
+  }
+
+  void ImGUI::showLightEditorWindow(const Rc<DxvkContext>& ctx) {
+    DxvkObjects* common = ctx->getCommonObjects();
+    auto& scene = common->getSceneManager();
+    auto& lightMgr = scene.getLightManager();
+
+    ImGui::SetNextWindowSize(ImVec2(360, 360), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Light Editor", &m_lightEditor.open, ImGuiWindowFlags_NoSavedSettings)) {
+      ImGui::End();
+      return;
+    }
+
+    // Anchor selection
+    if (ImGui::Button("Pick Anchor (click in viewport)")) {
+      // Enter pick mode; wait for the user's next click in the viewport, then issue a single pick request
+      m_lightEditor.pickingAwaitClick = true;
+      m_lightEditor.pickingRequested = false;
+    }
+    if (m_lightEditor.pickingAwaitClick) {
+      ImGui::SameLine();
+      ImGui::TextUnformatted("(Click in viewport to pick, Esc/Right-Click to cancel)");
+      // Allow cancel: use raw VK state to avoid ImGui focus edge-cases
+      if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        m_lightEditor.pickingAwaitClick = false;
+      }
+      if (GetAsyncKeyState(VK_RBUTTON) & 0x8000) {
+        m_lightEditor.pickingAwaitClick = false;
+      }
+      // When user clicks, send one request and immediately exit pick mode
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || (GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
+        auto& picking = common->metaDebugView().ObjectPicking;
+        const ImVec2 mp = ImGui::GetMousePos();
+        m_lightEditor.pickingRequested = true;
+        m_lightEditor.pickingAwaitClick = false;
+        picking.request(
+          tovec2i(mp), tovec2i(mp) + Vector2i{1,1},
+          [this,&scene](std::vector<ObjectPickingValue>&& values, std::optional<XXH64_hash_t>) {
+            if (!values.empty()) {
+              m_lightEditor.lastPickingValue = values[0];
+              // Find an instance with this picking value
+              const auto& instances = scene.getInstanceManager().getInstanceTable();
+              for (auto* inst : instances) {
+                if (inst && inst->surface.objectPickingValue == m_lightEditor.lastPickingValue) {
+                  m_lightEditor.anchorInstanceId = inst->getId();
+                  const AxisAlignedBoundingBox& aabb = inst->getBlas()->input.getGeometryData().boundingBox;
+                  m_lightEditor.anchorPositionWS = aabb.getTransformedCentroid(inst->getTransform());
+                  m_lightEditor.anchorHighlightFrames = 30; // ~0.5s at 60fps
+                  break;
+                }
+              }
+            }
+            m_lightEditor.pickingRequested = false;
+            m_lightEditor.pickingAwaitClick = false;
+          }
+        );
+      }
+    }
+    ImGui::SameLine();
+    if (m_lightEditor.anchorInstanceId != 0) {
+      ImGui::Text("Anchor ID: %llu", (unsigned long long)m_lightEditor.anchorInstanceId);
+    } else {
+      ImGui::Text("No anchor selected");
+    }
+
+    ImGui::Separator();
+    // Properties
+    ImGui::ColorEdit3("Radiance", &m_lightEditor.radiance.x, ImGuiColorEditFlags_Float);
+    ImGui::DragFloat("Radius", &m_lightEditor.radius, 0.05f, 0.0f, FLT_MAX, "%.2f");
+    ImGui::DragFloat("Volumetric Intensity", &m_lightEditor.volumetricScale, 0.01f, 0.0f, 8.0f, "%.2f");
+    ImGui::Checkbox("Light Shaping", &m_lightEditor.shapingEnabled);
+    if (m_lightEditor.shapingEnabled) {
+      ImGui::DragFloat3("Shape Dir", &m_lightEditor.shapingDirection.x, 0.01f, -1.0f, 1.0f, "%.2f");
+      ImGui::DragFloat("Cone Angle (deg)", &m_lightEditor.shapingConeAngleDeg, 0.1f, 0.0f, 179.0f, "%.1f");
+      ImGui::DragFloat("Cone Softness", &m_lightEditor.shapingConeSoftness, 0.01f, 0.0f, 1.0f, "%.2f");
+      ImGui::DragFloat("Focus Exponent", &m_lightEditor.shapingFocusExponent, 0.1f, 0.0f, 64.0f, "%.1f");
+    }
+
+    // Spawn / Update
+    const bool canSpawn = m_lightEditor.anchorInstanceId != 0;
+    ImGui::BeginDisabled(!canSpawn);
+    if (ImGui::Button(m_lightEditor.activeLight ? "Update Light" : "Spawn Sphere Light")) {
+      // Build shaping
+      RtLightShaping shaping(
+        m_lightEditor.shapingEnabled,
+        m_lightEditor.shapingDirection,
+        m_lightEditor.shapingEnabled ? cosf(m_lightEditor.shapingConeAngleDeg * (3.14159265f / 180.0f)) : 0.0f,
+        m_lightEditor.shapingConeSoftness,
+        m_lightEditor.shapingFocusExponent);
+
+      // Light position
+      Vector3 pos = m_lightEditor.anchorPositionWS;
+      auto optSphere = RtSphereLight::tryCreate(pos, m_lightEditor.radiance, m_lightEditor.radius, shaping, m_lightEditor.volumetricScale);
+      if (optSphere) {
+        RtLight newLight(*optSphere);
+        if (!m_lightEditor.activeLight) {
+          m_lightEditor.activeLight = lightMgr.createExternallyTrackedLight(newLight);
+          m_lightEditor.gizmoStartPosWS = pos;
+        } else {
+          lightMgr.updateExternallyTrackedLight(m_lightEditor.activeLight, newLight);
+        }
+      }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Delete Light") && m_lightEditor.activeLight) {
+      lightMgr.removeExternallyTrackedLight(m_lightEditor.activeLight);
+      m_lightEditor.activeLight = nullptr;
+      m_lightEditor.gizmoAxis = -1;
+      m_lightEditor.gizmoActive = false;
+    }
+    ImGui::EndDisabled();
+
+    ImGui::End();
+
+    // Gizmo overlay for active light
+    if (m_lightEditor.activeLight) {
+      const ImGuiViewport* vp = ImGui::GetMainViewport();
+      ImGui::SetNextWindowPos(vp->Pos);
+      ImGui::SetNextWindowSize(vp->Size);
+      ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0,0,0,0));
+      if (ImGui::Begin("Light Gizmo Overlay", nullptr, ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const RtCamera& cam = scene.getCamera();
+        const Matrix4 worldToProj = cam.getViewToProjection() * cam.getWorldToView(true);
+
+        // Read current light position
+        Vector3 p = m_lightEditor.activeLight->getPosition();
+        ImVec2 p2;
+        transformToScreen(worldToProj, Vector2{ vp->Size.x, vp->Size.y }, p, p2);
+
+        const float len = 64.0f;
+        const Vector3 axes[3] = { Vector3(1,0,0), Vector3(0,1,0), Vector3(0,0,1) };
+        ImVec2 endPts[3];
+        for (int i = 0; i < 3; ++i) {
+          ImVec2 e;
+          transformToScreen(worldToProj, Vector2{ vp->Size.x, vp->Size.y }, p + axes[i] * 0.25f, e);
+          // Re-scale to a fixed screen length from center
+          ImVec2 dir = ImVec2(e.x - p2.x, e.y - p2.y);
+          float d = sqrtf(dir.x*dir.x + dir.y*dir.y);
+          if (d > 1e-3f) { dir.x *= (len / d); dir.y *= (len / d); }
+          endPts[i] = ImVec2(p2.x + dir.x, p2.y + dir.y);
+          dl->AddLine(p2, endPts[i], axisColor(i), 3.0f);
+        }
+
+        // Radius ring handle
+        // Approximate pixel radius using world X axis
+        Vector3 camRight = Vector3(1.0f, 0.0f, 0.0f);
+        ImVec2 pr;
+        transformToScreen(worldToProj, Vector2{ vp->Size.x, vp->Size.y }, p + camRight * std::max(0.001f, m_lightEditor.radius), pr);
+        float ringPixels = sqrtf((pr.x - p2.x)*(pr.x - p2.x) + (pr.y - p2.y)*(pr.y - p2.y));
+        const float ringThickness = 3.0f;
+        dl->AddCircle(p2, ringPixels, IM_COL32(255,255,255,200), 48, ringThickness);
+
+        // Interaction
+        auto mouse = ImGui::GetMousePos();
+        if (!m_lightEditor.gizmoActive && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+          // Check radius ring first
+          float dist = sqrtf((mouse.x - p2.x)*(mouse.x - p2.x) + (mouse.y - p2.y)*(mouse.y - p2.y));
+          if (fabsf(dist - ringPixels) <= 8.0f) {
+            m_lightEditor.gizmoActive = true;
+            m_lightEditor.gizmoAxis = 3; // special value for radius
+            m_lightEditor.gizmoGrabMousePos = mouse;
+            m_lightEditor.gizmoStartPosWS = p;
+          } else {
+          // pick closest axis
+          float best = 8.0f; // pixels threshold
+          int picked = -1;
+          for (int i = 0; i < 3; ++i) {
+            // distance from mouse to segment p2-endPts[i]
+            ImVec2 a = p2, b = endPts[i];
+            ImVec2 ab = ImVec2(b.x - a.x, b.y - a.y);
+            ImVec2 am = ImVec2(mouse.x - a.x, mouse.y - a.y);
+            float t = (ab.x*am.x + ab.y*am.y) / (ab.x*ab.x + ab.y*ab.y + 1e-6f);
+            t = std::max(0.f, std::min(1.f, t));
+            ImVec2 h = ImVec2(a.x + ab.x*t, a.y + ab.y*t);
+            float d = sqrtf((h.x - mouse.x)*(h.x - mouse.x) + (h.y - mouse.y)*(h.y - mouse.y));
+            if (d < best) { best = d; picked = i; }
+          }
+          if (picked >= 0) {
+            m_lightEditor.gizmoActive = true;
+            m_lightEditor.gizmoAxis = picked;
+            m_lightEditor.gizmoGrabMousePos = mouse;
+            m_lightEditor.gizmoStartPosWS = p;
+          }
+          }
+        }
+        if (m_lightEditor.gizmoActive) {
+          if (m_lightEditor.gizmoAxis == 3) {
+            // Radius edit
+            float distPix = sqrtf((mouse.x - p2.x)*(mouse.x - p2.x) + (mouse.y - p2.y)*(mouse.y - p2.y));
+            float pixelsPerUnit = (ringPixels > 1e-3f) ? (ringPixels / std::max(0.001f, m_lightEditor.radius)) : 1.0f;
+            float newRadius = std::max(0.001f, distPix / pixelsPerUnit);
+            // snapping
+            ImGuiIO& io = ImGui::GetIO();
+            if (io.KeyShift) newRadius = std::round(newRadius / 0.1f) * 0.1f;
+            else if (io.KeyCtrl) newRadius = std::round(newRadius / 1.0f) * 1.0f;
+            m_lightEditor.radius = newRadius;
+
+            RtLightShaping shaping(
+              m_lightEditor.shapingEnabled,
+              m_lightEditor.shapingDirection,
+              m_lightEditor.shapingEnabled ? cosf(m_lightEditor.shapingConeAngleDeg * (3.14159265f / 180.0f)) : 0.0f,
+              m_lightEditor.shapingConeSoftness,
+              m_lightEditor.shapingFocusExponent);
+            auto optSphere = RtSphereLight::tryCreate(m_lightEditor.activeLight->getPosition(), m_lightEditor.radiance, m_lightEditor.radius, shaping, m_lightEditor.volumetricScale);
+            if (optSphere) {
+              RtLight updated(*optSphere);
+              lightMgr.updateExternallyTrackedLight(m_lightEditor.activeLight, updated);
+            }
+          } else {
+            // Move along axis proportionally to mouse drag in screen space
+            ImVec2 delta = ImVec2(mouse.x - m_lightEditor.gizmoGrabMousePos.x, mouse.y - m_lightEditor.gizmoGrabMousePos.y);
+            // Project delta onto axis screen direction
+            ImVec2 axisDir = ImVec2(endPts[m_lightEditor.gizmoAxis].x - p2.x, endPts[m_lightEditor.gizmoAxis].y - p2.y);
+            float axisLen2 = axisDir.x*axisDir.x + axisDir.y*axisDir.y + 1e-6f;
+            float t = (delta.x*axisDir.x + delta.y*axisDir.y) / axisLen2;
+            // Convert t back to world offset heuristic
+            float worldScale = 0.25f * t * (len / sqrtf(axisLen2));
+            Vector3 newPos = m_lightEditor.gizmoStartPosWS + axes[m_lightEditor.gizmoAxis] * worldScale * 4.0f;
+
+            // Recreate updated light
+            RtLightShaping shaping(
+              m_lightEditor.shapingEnabled,
+              m_lightEditor.shapingDirection,
+              m_lightEditor.shapingEnabled ? cosf(m_lightEditor.shapingConeAngleDeg * (3.14159265f / 180.0f)) : 0.0f,
+              m_lightEditor.shapingConeSoftness,
+              m_lightEditor.shapingFocusExponent);
+            auto optSphere = RtSphereLight::tryCreate(newPos, m_lightEditor.radiance, m_lightEditor.radius, shaping, m_lightEditor.volumetricScale);
+            if (optSphere) {
+              RtLight updated(*optSphere);
+              lightMgr.updateExternallyTrackedLight(m_lightEditor.activeLight, updated);
+            }
+          }
+
+          if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+            m_lightEditor.gizmoActive = false;
+            m_lightEditor.gizmoAxis = -1;
+          }
+        }
+
+        ImGui::End();
+      }
+      ImGui::PopStyleColor();
+    }
+
+    // Highlight anchor for a short duration after selection (or every frame if desired)
+    if (m_lightEditor.open && m_lightEditor.anchorInstanceId != 0 && m_lightEditor.lastPickingValue != 0) {
+      if (m_lightEditor.anchorHighlightFrames > 0) {
+        m_lightEditor.anchorHighlightFrames--;
+      }
+      if (m_lightEditor.anchorHighlightFrames > 0 && !m_lightEditor.pickingAwaitClick) {
+      std::vector<ObjectPickingValue> vals{ m_lightEditor.lastPickingValue };
+      common->metaDebugView().Highlighting.requestHighlighting(&vals, HighlightColor::UI, ctx->getDevice()->getCurrentFrameId());
+      }
+    }
   }
 
   namespace {
