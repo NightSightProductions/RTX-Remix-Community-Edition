@@ -22,12 +22,15 @@
 #include "rtx_camera_manager.h"
 
 #include "dxvk_device.h"
+#include <cmath>
 
 namespace {
   constexpr float kFovToleranceRadians = 0.001f;
 }
 
 namespace dxvk {
+  // Forward declaration from rtx_camera.cpp
+  Matrix4 getMatrixFromEulerAngles(float pitch, float yaw, float roll);
 
   CameraManager::CameraManager(DxvkDevice* device) : CommonDeviceObject(device) {
     for (int i = 0; i < CameraType::Count; i++) {
@@ -46,8 +49,112 @@ namespace dxvk {
   }
 
   CameraType::Enum CameraManager::processCameraData(const DrawCallState& input) {
-    // If theres no real camera data here - bail
+    // If theres no real camera data here - bail (unless forcing fake camera)
     if (isIdentityExact(input.getTransformData().viewToProjection)) {
+      // Inject a fake camera if requested and no sky camera is present
+      if (RtxOptions::injectFakeCamera() && !input.testCategoryFlags(InstanceCategories::Sky)) {
+        ONCE(Logger::warn("[RTX-Compatibility] Injecting fake camera with configurable parameters. Results may be incorrect!"));
+        
+        const uint32_t frameId = m_device->getCurrentFrameId();
+        RtCamera& mainCam = getCamera(CameraType::Main);
+        
+        // Get configurable fake camera parameters
+        const float fov = RtxOptions::fakeCameraFOV();
+        const float aspectRatio = RtxOptions::fakeCameraAspectRatio();
+        const float nearPlane = RtxOptions::fakeCameraNearPlane();
+        const float farPlane = RtxOptions::fakeCameraFarPlane();
+        Vector3 position = RtxOptions::fakeCameraPosition();
+        const float yaw = RtxOptions::fakeCameraYaw();
+        const float pitch = RtxOptions::fakeCameraPitch();
+        const float roll = RtxOptions::fakeCameraRoll();
+        
+        // Get rotation offset parameters
+        const float pitchOffset = RtxOptions::fakeCameraPitchOffset();
+        const float yawOffset = RtxOptions::fakeCameraYawOffset();
+        const float rollOffset = RtxOptions::fakeCameraRollOffset();
+        
+        // Get axis flipping parameters
+        const bool flipX = RtxOptions::fakeCameraFlipX();
+        const bool flipY = RtxOptions::fakeCameraFlipY();
+        const bool flipZ = RtxOptions::fakeCameraFlipZ();
+        
+        // Apply axis flipping to position
+        if (flipX) position.x = -position.x;
+        if (flipY) position.y = -position.y;
+        if (flipZ) position.z = -position.z;
+        
+        // Create perspective projection matrix from FOV and aspect ratio
+        const float tanHalfFov = std::tan(fov * 0.5f);
+        const float f = 1.0f / tanHalfFov;
+        const float rangeInv = 1.0f / (farPlane - nearPlane);
+        
+        Matrix4 fakeProjection = {
+          f / aspectRatio, 0.0f, 0.0f, 0.0f,
+          0.0f, f, 0.0f, 0.0f,
+          0.0f, 0.0f, farPlane * rangeInv, 1.0f,
+          0.0f, 0.0f, -farPlane * nearPlane * rangeInv, 0.0f
+        };
+        
+        // Construct view matrix from position and rotation
+        // First create base rotation matrix (view-to-world orientation)
+        Matrix4 rotationMatrix = getMatrixFromEulerAngles(pitch, yaw, roll);
+        
+        // Apply rotation offsets if any are specified
+        if (pitchOffset != 0.0f || yawOffset != 0.0f || rollOffset != 0.0f) {
+          // Create offset rotation matrix
+          Matrix4 offsetMatrix = getMatrixFromEulerAngles(pitchOffset, yawOffset, rollOffset);
+          // Apply offset rotation: rotationMatrix = rotationMatrix * offsetMatrix
+          rotationMatrix = rotationMatrix * offsetMatrix;
+        }
+        
+        // Apply axis flipping to the rotation matrix
+        // This flips the corresponding axes in the rotation matrix
+        // Note: This affects the view matrix. For more complex coordinate system
+        // transformations, projection matrix modifications might also be needed.
+        if (flipX) {
+          rotationMatrix[0] = Vector4(-rotationMatrix[0].x, -rotationMatrix[0].y, -rotationMatrix[0].z, -rotationMatrix[0].w); // Flip X-axis (right vector)
+        }
+        if (flipY) {
+          rotationMatrix[1] = Vector4(-rotationMatrix[1].x, -rotationMatrix[1].y, -rotationMatrix[1].z, -rotationMatrix[1].w); // Flip Y-axis (up vector)
+        }
+        if (flipZ) {
+          rotationMatrix[2] = Vector4(-rotationMatrix[2].x, -rotationMatrix[2].y, -rotationMatrix[2].z, -rotationMatrix[2].w); // Flip Z-axis (forward vector)
+        }
+        
+        // Build view-to-world matrix with rotation and translation
+        Matrix4 fakeViewToWorld = rotationMatrix;
+        fakeViewToWorld[3] = Vector4(position, 1.0f);
+        
+        // Invert to get world-to-view matrix
+        Matrix4 fakeWorldToView = inverse(fakeViewToWorld);
+        
+        // Set the fake camera with correct parameters
+        mainCam.update(frameId, fakeWorldToView, fakeProjection, 
+                      fov,
+                      aspectRatio,
+                      nearPlane,
+                      farPlane,
+                      false);  // not left-handed
+        
+        // Auto-enable free camera with default position and lock it (unless user wants to override)
+        if (!RtxOptions::allowFreeCameraOverride()) {
+          // Enable free camera
+          if (!RtCamera::enableFreeCamera()) {
+            RtCamera::enableFreeCameraObject().setDeferred(true);
+          }
+          
+          // Set free camera position to (0.01, 0.01, 0.01) // This works in most games so far
+          RtCamera::freeCameraPositionObject().setDeferred(Vector3(0.01f, 0.01f, 0.01f));
+          
+          // Lock the free camera
+          if (!RtCamera::lockFreeCamera()) {
+            RtCamera::lockFreeCameraObject().setDeferred(true);
+          }
+        }
+        
+        return CameraType::Main;
+      }
+      
       return input.testCategoryFlags(InstanceCategories::Sky) ? CameraType::Sky : CameraType::Unknown;
     }
 
