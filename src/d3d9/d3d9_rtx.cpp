@@ -16,6 +16,17 @@
 #include "../dxvk/rtx_render/rtx_terrain_baker.h"
 
 namespace dxvk {
+  // Forward declaration for global shader registry (defined in dxvk_imgui.cpp)
+  struct VertexShaderInfo {
+    uint64_t hash;
+    uint32_t drawCallCount;
+    std::string name;
+  };
+  
+  // Extern declarations for global shader registry
+  extern std::unordered_map<uint64_t, VertexShaderInfo> g_vertexShaderRegistry;
+  extern std::mutex g_vertexShaderRegistryMutex;
+  
   static const bool s_isDxvkResolutionEnvVarSet = (env::getEnvVar("DXVK_RESOLUTION_WIDTH") != "") || (env::getEnvVar("DXVK_RESOLUTION_HEIGHT") != "");
   
   // We only look at RT 0 currently.
@@ -131,16 +142,16 @@ namespace dxvk {
   void D3D9Rtx::prepareVertexCapture(const int vertexIndexOffset) {
     ScopedCpuProfileZone();
 
-    static_assert(sizeof CapturedVertex == 48, "The injected shader code is expecting this exact structure size to work correctly, see emitVertexCaptureWrite in dxso_compiler.cpp");
+    static_assert(sizeof CapturedVertex == 80, "The injected shader code is expecting this exact structure size to work correctly, see emitVertexCaptureWrite in dxso_compiler.cpp");
 
-    auto BoundShaderHas = [&](const D3D9CommonShader* shader, DxsoUsage usage, bool inOut)-> bool {
+    auto BoundShaderHas = [&](const D3D9CommonShader* shader, DxsoUsage usage, uint32_t usageIndex, bool inOut)-> bool {
       if (shader == nullptr)
         return false;
 
       const auto& sgn = inOut ? shader->GetIsgn() : shader->GetOsgn();
       for (uint32_t i = 0; i < sgn.elemCount; i++) {
         const auto& decl = sgn.elems[i];
-        if (decl.semantic.usageIndex == 0 && decl.semantic.usage == usage)
+        if (decl.semantic.usageIndex == usageIndex && decl.semantic.usage == usage)
           return true;
       }
       return false;
@@ -148,6 +159,39 @@ namespace dxvk {
 
     // Get common shaders to query what data we can capture
     const D3D9CommonShader* vertexShader = d3d9State().vertexShader.ptr() != nullptr ? d3d9State().vertexShader->GetCommonShader() : nullptr;
+
+    // Track vertex shader usage and check if we should capture from this shader
+    uint64_t currentShaderHash = 0;
+    bool shouldCapture = true;
+    
+    if (vertexShader != nullptr && d3d9State().vertexShader.ptr() != nullptr) {
+      // Get shader bytecode for hashing
+      auto& shaderByteCode = vertexShader->GetBytecode();
+      currentShaderHash = XXH64(shaderByteCode.data(), shaderByteCode.size(), 0);
+      
+      // Update global shader registry for ImGui
+      {
+        std::lock_guard<std::mutex> lock(g_vertexShaderRegistryMutex);
+        auto& info = g_vertexShaderRegistry[currentShaderHash];
+        info.hash = currentShaderHash;
+        info.drawCallCount++;
+        if (info.name.empty()) {
+          info.name = str::format("VS_", std::hex, currentShaderHash);
+        }
+      }
+      
+      // Check if we should only capture from specific shaders
+      const auto& targetHashes = vertexShadersToCapture();
+      if (!targetHashes.empty() && targetHashes.count(currentShaderHash) == 0) {
+        shouldCapture = false;
+      }
+    }
+    
+    // If this shader isn't selected for capture, return early
+    // This leaves the geometry buffers as set by processVertices (fixed function path)
+    if (!shouldCapture) {
+      return;
+    }
 
     RasterGeometry& geoData = m_activeDrawCallState.geometryData;
 
@@ -160,16 +204,22 @@ namespace dxvk {
     geoData.positionBuffer = RasterBuffer(slice, 0, stride, VK_FORMAT_R32G32B32A32_SFLOAT);
     assert(geoData.positionBuffer.offset() % 4 == 0);
 
-    // Did we have a texcoord buffer bound for this draw?  Note, we currently get texcoord from the vertex shader output 
-    if (BoundShaderHas(vertexShader, DxsoUsage::Texcoord, false) && (!geoData.texcoordBuffer.defined() || !RtxGeometryUtils::isTexcoordFormatValid(geoData.texcoordBuffer.vertexFormat()))) {
-      // Known offset for vertex capture buffers
+    // Capture TEXCOORD0
+    if (BoundShaderHas(vertexShader, DxsoUsage::Texcoord, 0, false) && (!geoData.texcoordBuffer.defined() || !RtxGeometryUtils::isTexcoordFormatValid(geoData.texcoordBuffer.vertexFormat()))) {
       const uint32_t texcoordOffset = offsetof(CapturedVertex, texcoord0);
       geoData.texcoordBuffer = RasterBuffer(slice, texcoordOffset, stride, VK_FORMAT_R32G32_SFLOAT);
       assert(geoData.texcoordBuffer.offset() % 4 == 0);
     }
 
-    // Check if we should/can get normals.  We don't see a lot of games sending normals to pixel shader, so we must capture from the IA output (or Vertex input)
-    if ((BoundShaderHas(vertexShader, DxsoUsage::Normal, false) || BoundShaderHas(vertexShader, DxsoUsage::Normal, true)) && useVertexCapturedNormals()) {
+    // Capture TEXCOORD1 (for lightmaps, detail textures)
+    if (useVertexCapturedTexcoords() && BoundShaderHas(vertexShader, DxsoUsage::Texcoord, 1, false)) {
+      const uint32_t texcoord1Offset = offsetof(CapturedVertex, texcoord1);
+      geoData.texcoord1Buffer = RasterBuffer(slice, texcoord1Offset, stride, VK_FORMAT_R32G32_SFLOAT);
+      assert(geoData.texcoord1Buffer.offset() % 4 == 0);
+    }
+
+    // Check if we should/can get normals
+    if ((BoundShaderHas(vertexShader, DxsoUsage::Normal, 0, false) || BoundShaderHas(vertexShader, DxsoUsage::Normal, 0, true)) && useVertexCapturedNormals()) {
       const uint32_t normalOffset = offsetof(CapturedVertex, normal0);
       geoData.normalBuffer = RasterBuffer(slice, normalOffset, stride, VK_FORMAT_R32G32B32_SFLOAT);
       assert(geoData.normalBuffer.offset() % 4 == 0);
@@ -177,11 +227,32 @@ namespace dxvk {
       geoData.normalBuffer = RasterBuffer();
     }
 
-    // Check if we should/can get colors
-    if (BoundShaderHas(vertexShader, DxsoUsage::Color, false) && d3d9State().pixelShader.ptr() == nullptr) {
+    // Capture Tangent (for normal mapping)
+    if (useVertexCapturedTangents() && BoundShaderHas(vertexShader, DxsoUsage::Tangent, 0, false)) {
+      const uint32_t tangentOffset = offsetof(CapturedVertex, tangent0);
+      geoData.tangentBuffer = RasterBuffer(slice, tangentOffset, stride, VK_FORMAT_R32G32B32_SFLOAT);
+      assert(geoData.tangentBuffer.offset() % 4 == 0);
+    }
+
+    // Capture Binormal (for normal mapping)
+    if (useVertexCapturedTangents() && BoundShaderHas(vertexShader, DxsoUsage::Binormal, 0, false)) {
+      const uint32_t binormalOffset = offsetof(CapturedVertex, binormal0);
+      geoData.binormalBuffer = RasterBuffer(slice, binormalOffset, stride, VK_FORMAT_R32G32B32_SFLOAT);
+      assert(geoData.binormalBuffer.offset() % 4 == 0);
+    }
+
+    // Capture COLOR0
+    if (BoundShaderHas(vertexShader, DxsoUsage::Color, 0, false) && d3d9State().pixelShader.ptr() == nullptr) {
       const uint32_t colorOffset = offsetof(CapturedVertex, color0);
       geoData.color0Buffer = RasterBuffer(slice, colorOffset, stride, VK_FORMAT_B8G8R8A8_UNORM);
       assert(geoData.color0Buffer.offset() % 4 == 0);
+    }
+
+    // Capture COLOR1 (specular color)
+    if (useVertexCapturedColor1() && BoundShaderHas(vertexShader, DxsoUsage::Color, 1, false)) {
+      const uint32_t color1Offset = offsetof(CapturedVertex, color1);
+      geoData.color1Buffer = RasterBuffer(slice, color1Offset, stride, VK_FORMAT_B8G8R8A8_UNORM);
+      assert(geoData.color1Buffer.offset() % 4 == 0);
     }
 
     auto constants = m_vsVertexCaptureData->allocSlice();

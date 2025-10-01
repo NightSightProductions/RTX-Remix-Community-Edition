@@ -560,17 +560,21 @@ namespace dxvk {
       const uint32_t vec2Type = m_module.defVectorType(floatType, 2);
       const uint32_t vec3Type = m_module.defVectorType(floatType, 3);
 
-      // struct CapturedVertex { vec3 pos; vec2 tex0; vec3 nrm0; uint color0; }
-      const uint32_t capMembers[4] = { vec3Type, vec2Type, vec3Type, uintType };
+      // struct CapturedVertex { vec3 pos; vec2 tex0; vec2 tex1; vec3 nrm0; uint color0; vec3 tangent0; uint color1; vec3 binormal0; }
+      const uint32_t capMembers[8] = { vec3Type, vec2Type, vec2Type, vec3Type, uintType, vec3Type, uintType, vec3Type };
       const uint32_t capturedVertexType = m_module.defStructType(std::size(capMembers), capMembers);
 
-      // Member offsets (std430, lean)
+      // Member offsets (std430)
       m_module.memberDecorateOffset(capturedVertexType, (uint32_t) CapturedVertexMembers::Position, offsetof(CapturedVertex, position));
       m_module.memberDecorateOffset(capturedVertexType, (uint32_t) CapturedVertexMembers::Texcoord0, offsetof(CapturedVertex, texcoord0));
+      m_module.memberDecorateOffset(capturedVertexType, (uint32_t) CapturedVertexMembers::Texcoord1, offsetof(CapturedVertex, texcoord1));
       m_module.memberDecorateOffset(capturedVertexType, (uint32_t) CapturedVertexMembers::Normal0, offsetof(CapturedVertex, normal0));
       m_module.memberDecorateOffset(capturedVertexType, (uint32_t) CapturedVertexMembers::Color0, offsetof(CapturedVertex, color0));
+      m_module.memberDecorateOffset(capturedVertexType, (uint32_t) CapturedVertexMembers::Tangent0, offsetof(CapturedVertex, tangent0));
+      m_module.memberDecorateOffset(capturedVertexType, (uint32_t) CapturedVertexMembers::Color1, offsetof(CapturedVertex, color1));
+      m_module.memberDecorateOffset(capturedVertexType, (uint32_t) CapturedVertexMembers::Binormal0, offsetof(CapturedVertex, binormal0));
 
-      // Runtime array of CapturedVertex with 48B stride
+      // Runtime array of CapturedVertex with 80B stride
       const uint32_t capArrayType = m_module.defRuntimeArrayTypeUnique(capturedVertexType);
       m_module.decorateArrayStride(capArrayType, sizeof CapturedVertex);
 
@@ -3811,7 +3815,7 @@ void DxsoCompiler::emitControlFlowGenericLoop(
 
     emitVertexCaptureWrite(vertexIndex, CapturedVertexMembers::Position, obj3, vec3TypeId);
     
-    // Write texcoord
+    // Write texcoord0
     {
       uint32_t tex2 = m_module.constvec2f32(0.0f, 0.0f);
       if (m_vs.oTex0.id > 0) {
@@ -3820,8 +3824,19 @@ void DxsoCompiler::emitControlFlowGenericLoop(
         const uint32_t vec2TypeId = getVectorTypeId({ DxsoScalarType::Float32, 2 });
         tex2 = m_module.opVectorShuffle(vec2TypeId, tex4, tex4, 2, lit01);
       }
-      // tex0.xy (vec2) @ member 1
       emitVertexCaptureWrite(vertexIndex, CapturedVertexMembers::Texcoord0, tex2, getVectorTypeId({ DxsoScalarType::Float32, 2 }));
+    }
+
+    // Write texcoord1
+    {
+      uint32_t tex2 = m_module.constvec2f32(0.0f, 0.0f);
+      if (m_vs.oTex1.id > 0) {
+        const uint32_t tex4 = m_module.opLoad(vec4TypeId, m_vs.oTex1.id);
+        const uint32_t lit01[2] = { 0, 1 };
+        const uint32_t vec2TypeId = getVectorTypeId({ DxsoScalarType::Float32, 2 });
+        tex2 = m_module.opVectorShuffle(vec2TypeId, tex4, tex4, 2, lit01);
+      }
+      emitVertexCaptureWrite(vertexIndex, CapturedVertexMembers::Texcoord1, tex2, getVectorTypeId({ DxsoScalarType::Float32, 2 }));
     }
 
     if (m_vs.oNormal0.id > 0) {
@@ -3920,6 +3935,111 @@ void DxsoCompiler::emitControlFlowGenericLoop(
       emitVertexCaptureWrite(vertexIndex, CapturedVertexMembers::Color0, colorU32, uintType);
     }
 
+    // Write tangent0
+    if (m_vs.oTangent0.id > 0) {
+      const uint32_t vec3typeId = getVectorTypeId({ DxsoScalarType::Float32, 3 });
+      const uint32_t mat3typeId = m_module.defMatrixType(vec3typeId, 3);
+      uint32_t normalTransformId = LoadConstant(mat4TypeId, (uint32_t) (D3D9RtxVertexCaptureMembers::NormalTransform));
+
+      // Convert to float3x3
+      std::array<uint32_t, 4> indices = { 0, 1, 2, 3 };
+      std::array<uint32_t, 3> mtxIndices;
+      for (uint32_t i = 0; i < 3; i++) {
+        mtxIndices[i] = m_module.opCompositeExtract(vec4TypeId, normalTransformId, 1, &i);
+        mtxIndices[i] = m_module.opVectorShuffle(vec3typeId, mtxIndices[i], mtxIndices[i], 3, indices.data());
+      }
+      normalTransformId = m_module.opCompositeConstruct(mat3typeId, mtxIndices.size(), mtxIndices.data());
+
+      // Load and transform tangent
+      const uint32_t floatTypeId = getScalarTypeId(DxsoScalarType::Float32);
+      uint32_t tangent0 = m_module.opLoad(vec4TypeId, m_vs.oTangent0.id);
+      {
+        std::array<uint32_t, 3> tangentIndices = {
+          m_module.opCompositeExtract(floatTypeId, tangent0, 1, &indices[0]),
+          m_module.opCompositeExtract(floatTypeId, tangent0, 1, &indices[1]),
+          m_module.opCompositeExtract(floatTypeId, tangent0, 1, &indices[2]),
+        };
+        tangent0 = m_module.opCompositeConstruct(vec3typeId, tangentIndices.size(), tangentIndices.data());
+      }
+      tangent0 = m_module.opMatrixTimesVector(vec3typeId, normalTransformId, tangent0);
+      emitVertexCaptureWrite(vertexIndex, CapturedVertexMembers::Tangent0, tangent0, vec3typeId);
+    }
+
+    // Write binormal0
+    if (m_vs.oBinormal0.id > 0) {
+      const uint32_t vec3typeId = getVectorTypeId({ DxsoScalarType::Float32, 3 });
+      const uint32_t mat3typeId = m_module.defMatrixType(vec3typeId, 3);
+      uint32_t normalTransformId = LoadConstant(mat4TypeId, (uint32_t) (D3D9RtxVertexCaptureMembers::NormalTransform));
+
+      // Convert to float3x3
+      std::array<uint32_t, 4> indices = { 0, 1, 2, 3 };
+      std::array<uint32_t, 3> mtxIndices;
+      for (uint32_t i = 0; i < 3; i++) {
+        mtxIndices[i] = m_module.opCompositeExtract(vec4TypeId, normalTransformId, 1, &i);
+        mtxIndices[i] = m_module.opVectorShuffle(vec3typeId, mtxIndices[i], mtxIndices[i], 3, indices.data());
+      }
+      normalTransformId = m_module.opCompositeConstruct(mat3typeId, mtxIndices.size(), mtxIndices.data());
+
+      // Load and transform binormal
+      const uint32_t floatTypeId = getScalarTypeId(DxsoScalarType::Float32);
+      uint32_t binormal0 = m_module.opLoad(vec4TypeId, m_vs.oBinormal0.id);
+      {
+        std::array<uint32_t, 3> binormalIndices = {
+          m_module.opCompositeExtract(floatTypeId, binormal0, 1, &indices[0]),
+          m_module.opCompositeExtract(floatTypeId, binormal0, 1, &indices[1]),
+          m_module.opCompositeExtract(floatTypeId, binormal0, 1, &indices[2]),
+        };
+        binormal0 = m_module.opCompositeConstruct(vec3typeId, binormalIndices.size(), binormalIndices.data());
+      }
+      binormal0 = m_module.opMatrixTimesVector(vec3typeId, normalTransformId, binormal0);
+      emitVertexCaptureWrite(vertexIndex, CapturedVertexMembers::Binormal0, binormal0, vec3typeId);
+    }
+
+    // Write COLOR1 (specular)
+    {
+      const uint32_t floatTypeId = getScalarTypeId(DxsoScalarType::Float32);
+      uint32_t color1U32 = m_module.constu32(0x00000000u); // default transparent black
+
+      if (m_vs.oColor1.id > 0) {
+        const uint32_t c4 = m_module.opLoad(vec4TypeId, m_vs.oColor1.id);
+
+        auto clamp01 = [&](uint32_t f) {
+          const uint32_t z = m_module.constf32(0.0f);
+          const uint32_t o = m_module.constf32(1.0f);
+          return m_module.opFMin(floatTypeId, m_module.opFMax(floatTypeId, f, z), o);
+        };
+
+        uint32_t r = clamp01(m_module.opCompositeExtract(floatTypeId, c4, 1, &lit0));
+        uint32_t g = clamp01(m_module.opCompositeExtract(floatTypeId, c4, 1, &lit1));
+        uint32_t b = clamp01(m_module.opCompositeExtract(floatTypeId, c4, 1, &lit2));
+        uint32_t a = clamp01(m_module.opCompositeExtract(floatTypeId, c4, 1, &lit3));
+
+        auto toU8 = [&](uint32_t f) -> uint32_t {
+          const uint32_t zero = m_module.constf32(0.0f);
+          const uint32_t one = m_module.constf32(1.0f);
+          f = m_module.opFMin(floatTypeId, m_module.opFMax(floatTypeId, f, zero), one);
+          const uint32_t scaled = m_module.opFAdd(
+              floatTypeId,
+              m_module.opFMul(floatTypeId, f, m_module.constf32(255.0f)),
+              m_module.constf32(0.5f));
+          return m_module.opConvertFtoU(uintType, scaled);
+        };
+
+        uint32_t r8 = toU8(r);
+        uint32_t g8 = toU8(g);
+        uint32_t b8 = toU8(b);
+        uint32_t a8 = toU8(a);
+
+        auto shl = [&](uint32_t v, uint32_t s) { return m_module.opShiftLeftLogical(uintType, v, m_module.constu32(s)); };
+        auto bor = [&](uint32_t x, uint32_t y) { return m_module.opBitwiseOr(uintType, x, y); };
+
+        // ARGB packing: 0xAARRGGBB
+        color1U32 = bor(bor(shl(a8, 24), shl(r8, 16)), bor(shl(g8, 8), b8));
+      }
+
+      emitVertexCaptureWrite(vertexIndex, CapturedVertexMembers::Color1, color1U32, uintType);
+    }
+
     // Apply custom vertex transform if it's enabled
     {
       const uint32_t oldPos = m_module.opLoad(vec4TypeId, m_vs.oPos.id);
@@ -4010,11 +4130,19 @@ void DxsoCompiler::emitControlFlowGenericLoop(
         // NV-DXVK start: vertex shader data capture implementation
         if (elem.semantic.usage == DxsoUsage::Texcoord && elem.semantic.usageIndex == 0) {
           m_vs.oTex0 = outputPtr;
+        } else if (elem.semantic.usage == DxsoUsage::Texcoord && elem.semantic.usageIndex == 1) {
+          m_vs.oTex1 = outputPtr;  // Second UV set
         } else if (elem.semantic.usage == DxsoUsage::Color && elem.semantic.usageIndex == 0) {
           m_vs.oColor0 = outputPtr;
+        } else if (elem.semantic.usage == DxsoUsage::Color && elem.semantic.usageIndex == 1) {
+          m_vs.oColor1 = outputPtr;  // Specular color
         } else if (elem.semantic.usage == DxsoUsage::Normal && elem.semantic.usageIndex == 0) {
           // If this output sematic exists, replace the pointer, since output normals are preferred (will have undergone transforms)
           m_vs.oNormal0 = outputPtr;
+        } else if (elem.semantic.usage == DxsoUsage::Tangent && elem.semantic.usageIndex == 0) {
+          m_vs.oTangent0 = outputPtr;  // Tangent
+        } else if (elem.semantic.usage == DxsoUsage::Binormal && elem.semantic.usageIndex == 0) {
+          m_vs.oBinormal0 = outputPtr;  // Binormal
         }
         // NV-DXVK end
       }

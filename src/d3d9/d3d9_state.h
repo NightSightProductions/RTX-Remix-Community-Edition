@@ -36,17 +36,24 @@ namespace dxvk {
     Vector3 position;
     uint32_t pad0;
     Vector2 texcoord0;
-    uint32_t pad1;
-    uint32_t pad2;
+    Vector2 texcoord1;     // Second UV set for lightmaps/detail
     Vector3 normal0;
     uint32_t color0;
+    Vector3 tangent0;      // Tangent for normal mapping
+    uint32_t color1;       // Secondary color (specular)
+    Vector3 binormal0;     // Binormal for normal mapping
+    uint32_t pad1;
   };
 
   enum class CapturedVertexMembers {
     Position = 0,
     Texcoord0,
+    Texcoord1,      // Second UV set for lightmaps/detail
     Normal0,
     Color0,
+    Tangent0,       // Tangent for normal mapping
+    Color1,         // Secondary color (specular)
+    Binormal0,      // Binormal for normal mapping
 
     MemberCount
   };

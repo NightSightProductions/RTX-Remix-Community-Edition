@@ -180,8 +180,12 @@ namespace dxvk {
 
     // NV-DXVK start: vertex shader data capture implementation
     DxsoRegisterPointer oTex0;
+    DxsoRegisterPointer oTex1;      // Second UV set
     DxsoRegisterPointer oNormal0;
+    DxsoRegisterPointer oTangent0;  // Tangent
+    DxsoRegisterPointer oBinormal0; // Binormal
     DxsoRegisterPointer oColor0;
+    DxsoRegisterPointer oColor1;    // Specular color
     // NV-DXVK end
   };
 

@@ -374,6 +374,38 @@ namespace dxvk
     return customTransform;
   }
 
+  Matrix4 getMatrixFromEulerAngles(float pitch, float yaw, float roll) {
+    // Construct rotation matrix from Euler angles (Yaw -> Pitch -> Roll order)
+    float cosPitch = cos(pitch);
+    float sinPitch = sin(pitch);
+    float cosYaw = cos(yaw);
+    float sinYaw = sin(yaw);
+    float cosRoll = cos(roll);
+    float sinRoll = sin(roll);
+    
+    Matrix4 customTransform;
+    customTransform[0] = Vector4{ 
+      cosYaw * cosRoll + sinYaw * sinPitch * sinRoll, 
+      cosPitch * sinRoll, 
+      -sinYaw * cosRoll + cosYaw * sinPitch * sinRoll, 
+      0.0 
+    };
+    customTransform[1] = Vector4{ 
+      -cosYaw * sinRoll + sinYaw * sinPitch * cosRoll, 
+      cosPitch * cosRoll, 
+      sinYaw * sinRoll + cosYaw * sinPitch * cosRoll, 
+      0.0 
+    };
+    customTransform[2] = Vector4{ 
+      sinYaw * cosPitch, 
+      -sinPitch, 
+      cosPitch * cosYaw, 
+      0.0 
+    };
+    customTransform[3] = Vector4{ 0.0, 0.0, 0.0, 1.0 };
+    return customTransform;
+  }
+
   const RtCamera::RtCameraSetting& RtCamera::getSetting() {
     return m_context;
   }
@@ -986,6 +1018,22 @@ namespace dxvk
 
       ImGui::Checkbox("Enable Free Camera", &enableFreeCameraObject());
       ImGui::Checkbox("Lock Free Camera", &lockFreeCameraObject());
+      
+      // Show override option when fake camera is active
+      if (RtxOptions::injectFakeCamera()) {
+        ImGui::Separator();
+        ImGui::Checkbox("Allow Free Camera Override", &RtxOptions::allowFreeCameraOverrideObject());
+        ImGui::SetTooltipToLastWidgetOnHover("When disabled, fake camera auto-enables free camera at (0.01, 0.01, 0.01) and locks it.\nWhen enabled, you can manually adjust all free camera settings below.");
+        
+        if (!RtxOptions::allowFreeCameraOverride()) {
+          ImGui::Spacing();
+          ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.3f, 1.0f));
+          ImGui::TextWrapped("Note: Fake camera is controlling free camera settings. Enable 'Allow Free Camera Override' above to manually adjust.");
+          ImGui::PopStyleColor();
+        }
+        ImGui::Separator();
+      }
+      
       ImGui::DragFloat3("Position", &freeCameraPositionObject(), 0.1f, -1e5, -1e5, "%.3f", sliderFlags);
       ImGui::DragFloat("Yaw", &freeCameraYawObject(), 0.1f, -Pi<float>(2), Pi<float>(2), "%.3f", sliderFlags);
       ImGui::DragFloat("Pitch", &freeCameraPitchObject(), 0.1f, -Pi<float>(2), Pi<float>(2), "%.3f", sliderFlags);
