@@ -388,7 +388,7 @@ namespace dxvk {
 
     auto lowGraphicsPresetCommonSettings = [&]() {
       pathMinBounces.setDeferred(0);
-      pathMaxBounces.setDeferred(2);
+      pathMaxBounces.setDeferred(1);
       enableTransmissionApproximationInIndirectRays.setDeferred(true);
       enableUnorderedEmissiveParticlesInIndirectRays.setDeferred(false);
       denoiseDirectAndIndirectLightingSeparately.setDeferred(false);
@@ -463,6 +463,9 @@ namespace dxvk {
       DxvkRayReconstruction::model.setDeferred(DxvkRayReconstruction::RayReconstructionModel::Transformer);
     } else if (graphicsPreset() == GraphicsPreset::Medium) {
       lowGraphicsPresetCommonSettings();
+      
+      pathMinBounces.setDeferred(0);
+      pathMaxBounces.setDeferred(2);
 
       russianRouletteMaxContinueProbability.setDeferred(0.7f);
       russianRoulette1stBounceMinContinueProbability.setDeferred(0.4f);
