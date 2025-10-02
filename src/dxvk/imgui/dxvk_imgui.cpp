@@ -154,6 +154,15 @@ namespace dxvk {
   XXH64_hash_t g_usedFogStateHash;
   std::mutex g_imguiFogMapMutex; // protects g_imguiFogMap
 
+  // Track vertex shaders for selection/debugging
+  struct VertexShaderInfo {
+    uint64_t hash = 0;
+    uint32_t drawCallCount = 0;
+    std::string name;
+  };
+  std::unordered_map<uint64_t, VertexShaderInfo> g_vertexShaderRegistry;
+  std::mutex g_vertexShaderRegistryMutex; // protects g_vertexShaderRegistry
+
   struct RtxTextureOption {
     const char* uniqueId;
     const char* displayName;
@@ -2955,10 +2964,264 @@ namespace dxvk {
 
       if (ImGui::CollapsingHeader("Shader Support (Experimental)", collapsingHeaderClosedFlags)) {
         ImGui::Indent();
-        ImGui::Checkbox("Capture Vertices from Shader", &D3D9Rtx::useVertexCaptureObject());
-        ImGui::Checkbox("Capture Normals from Shader", &D3D9Rtx::useVertexCapturedNormalsObject());
+        
+        ImGui::Checkbox("Enable Vertex Capture", &D3D9Rtx::useVertexCaptureObject());
+        ImGui::SetTooltipToLastWidgetOnHover("Injects code into vertex shaders to capture final transformed vertex data for ray tracing.");
+        
+        if (D3D9Rtx::useVertexCapture()) {
+          ImGui::Indent();
+          
+          // Basic attributes
+          ImGui::Text("Basic Attributes:");
+          ImGui::Checkbox("Capture Normals", &D3D9Rtx::useVertexCapturedNormalsObject());
+          ImGui::SetTooltipToLastWidgetOnHover("Capture vertex normals from shader. May not work if normals are in non-standard coordinate space.");
+          
+          // Vertex Shader Selection
+          ImGui::Separator();
+          ImGui::Text("Shader Debugger:");
+          ImGui::TextWrapped("Select specific shaders to capture. Useful for isolating problematic shaders or testing outputs.");
+          ImGui::Spacing();
+          
+          // Access global shader registry
+          extern std::unordered_map<uint64_t, VertexShaderInfo> g_vertexShaderRegistry;
+          extern std::mutex g_vertexShaderRegistryMutex;
+          
+          // Static cache to keep list stable during interaction
+          static std::vector<std::pair<uint64_t, VertexShaderInfo>> cachedShaderList;
+          static bool userIsInteracting = false;
+          static float lastUpdateTime = 0.0f;
+          
+          // Check if user is interacting with the checkbox list
+          bool isHoveringList = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(
+            ImGui::GetCursorScreenPos(), 
+            ImVec2(ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x, 
+                   ImGui::GetCursorScreenPos().y + 200)
+          );
+          
+          // Update cache periodically or when not interacting
+          float currentTime = ImGui::GetTime();
+          bool shouldUpdate = cachedShaderList.empty() || 
+                             (!userIsInteracting && !isHoveringList && (currentTime - lastUpdateTime > 1.0f));
+          
+          if (shouldUpdate) {
+            cachedShaderList.clear();
+            {
+              std::lock_guard<std::mutex> lock(g_vertexShaderRegistryMutex);
+              for (const auto& [hash, info] : g_vertexShaderRegistry) {
+                cachedShaderList.push_back(std::make_pair(hash, info));
+              }
+            }
+            
+            // Sort by draw call count (descending)
+            std::sort(cachedShaderList.begin(), cachedShaderList.end(), [](const auto& a, const auto& b) {
+              return a.second.drawCallCount > b.second.drawCallCount;
+            });
+            
+            lastUpdateTime = currentTime;
+          }
+          
+          auto& shaderList = cachedShaderList;
+          
+          if (!shaderList.empty()) {
+            // Get current selection set
+            const auto& selectedHashes = D3D9Rtx::vertexShadersToCapture();
+            size_t selectedCount = selectedHashes.size();
+            
+            // Status display
+            if (selectedCount == 0) {
+              ImGui::TextColored(ImVec4(0.7f, 1.0f, 0.7f, 1.0f), "Status: Capturing ALL shaders (%zu total)", shaderList.size());
+            } else {
+              ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Status: Capturing %zu of %zu shaders", selectedCount, shaderList.size());
+            }
+            
+            ImGui::Spacing();
+            
+            // Shader selection list with checkboxes
+            ImGui::Text("Select Shaders to Capture:");
+            if (ImGui::BeginChild("ShaderListRegion", ImVec2(0, 200), true)) {
+              // Track if user is clicking/interacting
+              userIsInteracting = ImGui::IsWindowHovered() || ImGui::IsAnyItemActive();
+              
+              for (const auto& [hash, info] : shaderList) {
+                bool isSelected = selectedHashes.count(hash) > 0;
+                std::string label = str::format(info.name, " (", info.drawCallCount, " draws)");
+                
+                // Use unique ID to prevent conflicts
+                ImGui::PushID((void*)(uintptr_t)hash);
+                if (ImGui::Checkbox(label.c_str(), &isSelected)) {
+                  if (isSelected) {
+                    D3D9Rtx::vertexShadersToCapture.addHash(hash);
+                  } else {
+                    D3D9Rtx::vertexShadersToCapture.removeHash(hash);
+                  }
+                }
+                ImGui::PopID();
+                
+                // Show hash on hover
+                if (ImGui::IsItemHovered()) {
+                  ImGui::SetTooltip("Hash: 0x%016llX", hash);
+                }
+              }
+            }
+            ImGui::EndChild();
+            
+            ImGui::Spacing();
+            
+            // Quick action buttons
+            if (ImGui::Button("Select All")) {
+              for (const auto& [hash, info] : shaderList) {
+                D3D9Rtx::vertexShadersToCapture.addHash(hash);
+              }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Clear Selection")) {
+              for (const auto& [hash, info] : shaderList) {
+                D3D9Rtx::vertexShadersToCapture.removeHash(hash);
+              }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Clear Shader List")) {
+              std::lock_guard<std::mutex> lock(g_vertexShaderRegistryMutex);
+              g_vertexShaderRegistry.clear();
+              for (const auto& [hash, info] : shaderList) {
+                D3D9Rtx::vertexShadersToCapture.removeHash(hash);
+              }
+              cachedShaderList.clear();  // Force refresh on next frame
+            }
+            ImGui::SetTooltipToLastWidgetOnHover("Clear the tracked shader list. Shaders will be re-discovered as the game runs.");
+            
+            ImGui::SameLine();
+            if (ImGui::Button("Refresh List")) {
+              cachedShaderList.clear();
+              lastUpdateTime = 0.0f;
+            }
+            ImGui::SetTooltipToLastWidgetOnHover("Manually refresh the shader list to update draw call counts.");
+            
+            if (selectedCount > 0) {
+              ImGui::Spacing();
+              ImGui::TextWrapped("ONLY geometry from selected shaders will be captured. All other geometry will use fixed-function path (if available).");
+            }
+            
+          } else {
+            ImGui::TextWrapped("No vertex shaders detected yet. Play the game for a few seconds to populate this list.");
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Tip: Shaders are automatically tracked when vertex capture is enabled.");
+          }
+          
+          ImGui::Unindent();
+        }
+        
+        // Camera Forcing Options
+        ImGui::Separator();
+        ImGui::Text("Injection:");
+        ImGui::TextWrapped("Use these options when Remix fails to inject ray tracing. They bypass camera validation or inject fake cameras.");
+        ImGui::Spacing();
+        
+        ImGui::Checkbox("Force Camera Valid", &RtxOptions::forceCameraValidObject());
+        ImGui::SetTooltipToLastWidgetOnHover("Bypass all camera validation checks. Use when Remix detects invalid cameras but ray tracing should still work. 'Inject Fake Camera' is recommended over this.");
+        
+        ImGui::Checkbox("Inject Fake Camera", &RtxOptions::injectFakeCameraObject());
+        ImGui::SetTooltipToLastWidgetOnHover("Create a default camera when none is detected. Use for games with non-standard camera setups or identity matrices.");
+        
+        // Show fake camera controls when enabled
+        if (RtxOptions::injectFakeCamera()) {
+          ImGui::Indent();
+          ImGui::Spacing();
+          
+          ImGui::Text("Fake Camera Parameters:");
+          ImGui::TextWrapped("These settings define the injected camera's projection and transform. Free camera settings are in the Camera section.");
+          
+          // Position controls
+          ImGui::DragFloat3("Position (XYZ)", &RtxOptions::fakeCameraPositionObject(), 1.0f, -10000.0f, 10000.0f);
+          ImGui::SetTooltipToLastWidgetOnHover("Camera position in world space.");
+          
+          // Rotation controls (in degrees for user friendliness, converted to radians internally)
+          float yawDeg = RtxOptions::fakeCameraYaw() * 180.0f / 3.14159265f;
+          float pitchDeg = RtxOptions::fakeCameraPitch() * 180.0f / 3.14159265f;
+          float rollDeg = RtxOptions::fakeCameraRoll() * 180.0f / 3.14159265f;
+          
+          if (ImGui::DragFloat("Yaw (degrees)", &yawDeg, 0.5f, -180.0f, 180.0f)) {
+            RtxOptions::fakeCameraYawObject().setDeferred(yawDeg * 3.14159265f / 180.0f);
+          }
+          ImGui::SetTooltipToLastWidgetOnHover("Camera rotation around vertical axis (look left/right).");
+          
+          if (ImGui::DragFloat("Pitch (degrees)", &pitchDeg, 0.5f, -89.0f, 89.0f)) {
+            RtxOptions::fakeCameraPitchObject().setDeferred(pitchDeg * 3.14159265f / 180.0f);
+          }
+          ImGui::SetTooltipToLastWidgetOnHover("Camera rotation around horizontal axis (look up/down).");
+          
+          if (ImGui::DragFloat("Roll (degrees)", &rollDeg, 0.5f, -180.0f, 180.0f)) {
+            RtxOptions::fakeCameraRollObject().setDeferred(rollDeg * 3.14159265f / 180.0f);
+          }
+          ImGui::SetTooltipToLastWidgetOnHover("Camera rotation around forward axis (tilt).");
+          
+          // FOV control (in degrees)
+          float fovDeg = RtxOptions::fakeCameraFOV() * 180.0f / 3.14159265f;
+          if (ImGui::SliderFloat("FOV (degrees)", &fovDeg, 30.0f, 120.0f)) {
+            RtxOptions::fakeCameraFOVObject().setDeferred(fovDeg * 3.14159265f / 180.0f);
+          }
+          ImGui::SetTooltipToLastWidgetOnHover("Field of view angle.");
+          
+          // Aspect ratio control
+          ImGui::DragFloat("Aspect Ratio", &RtxOptions::fakeCameraAspectRatioObject(), 0.01f, 0.5f, 3.0f);
+          ImGui::SetTooltipToLastWidgetOnHover("Width / Height ratio (16:9 = 1.778, 4:3 = 1.333).");
+          
+          // Near/Far plane controls
+          ImGui::DragFloat("Near Plane", &RtxOptions::fakeCameraNearPlaneObject(), 0.01f, 0.001f, 10.0f);
+          ImGui::SetTooltipToLastWidgetOnHover("Near clipping plane distance.");
+          
+          ImGui::DragFloat("Far Plane", &RtxOptions::fakeCameraFarPlaneObject(), 10.0f, 10.0f, 100000.0f);
+          ImGui::SetTooltipToLastWidgetOnHover("Far clipping plane distance.");
+          
+          // Axis flipping controls
+          ImGui::Spacing();
+          ImGui::Text("Axis Flipping:");
+          ImGui::Checkbox("Flip X-axis", &RtxOptions::fakeCameraFlipXObject());
+          ImGui::SetTooltipToLastWidgetOnHover("Flip the X-axis (left/right). Useful for mirrored coordinate systems.");
+          ImGui::SameLine();
+          ImGui::Checkbox("Flip Y-axis", &RtxOptions::fakeCameraFlipYObject());
+          ImGui::SetTooltipToLastWidgetOnHover("Flip the Y-axis (up/down). Useful for inverted Y coordinate systems.");
+          ImGui::SameLine();
+          ImGui::Checkbox("Flip Z-axis", &RtxOptions::fakeCameraFlipZObject());
+          ImGui::SetTooltipToLastWidgetOnHover("Flip the Z-axis (forward/backward). Useful for different depth conventions.");
+          
+          // Rotation offset controls
+          ImGui::Spacing();
+          ImGui::Text("Rotation Offsets:");
+          
+          // Convert from radians to degrees for user-friendly display
+          float pitchOffsetDeg = RtxOptions::fakeCameraPitchOffset() * 180.0f / 3.14159265f;
+          float yawOffsetDeg = RtxOptions::fakeCameraYawOffset() * 180.0f / 3.14159265f;
+          float rollOffsetDeg = RtxOptions::fakeCameraRollOffset() * 180.0f / 3.14159265f;
+          
+          if (ImGui::DragFloat("Pitch Offset (degrees)", &pitchOffsetDeg, 0.5f, -180.0f, 180.0f)) {
+            RtxOptions::fakeCameraPitchOffsetObject().setDeferred(pitchOffsetDeg * 3.14159265f / 180.0f);
+          }
+          ImGui::SetTooltipToLastWidgetOnHover("Additional pitch rotation offset applied after base rotation.");
+          
+          if (ImGui::DragFloat("Yaw Offset (degrees)", &yawOffsetDeg, 0.5f, -180.0f, 180.0f)) {
+            RtxOptions::fakeCameraYawOffsetObject().setDeferred(yawOffsetDeg * 3.14159265f / 180.0f);
+          }
+          ImGui::SetTooltipToLastWidgetOnHover("Additional yaw rotation offset applied after base rotation.");
+          
+          if (ImGui::DragFloat("Roll Offset (degrees)", &rollOffsetDeg, 0.5f, -180.0f, 180.0f)) {
+            RtxOptions::fakeCameraRollOffsetObject().setDeferred(rollOffsetDeg * 3.14159265f / 180.0f);
+          }
+          ImGui::SetTooltipToLastWidgetOnHover("Additional roll rotation offset applied after base rotation.");
+          
+          ImGui::Unindent();
+        }
+        
+        if (RtxOptions::forceCameraValid() || RtxOptions::injectFakeCamera()) {
+          ImGui::Spacing();
+          ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.2f, 1.0f), "Warning: These are compatibility hacks!");
+          ImGui::TextWrapped("Results may be incorrect. Only use if ray tracing isn't working normally.");
+        }
+        
         ImGui::Separator();
         ImGui::Checkbox("Use World Transforms", &D3D9Rtx::useWorldMatricesForShadersObject());
+        ImGui::SetTooltipToLastWidgetOnHover("Use fixed-function world matrices with programmable shaders. Disable if seeing precision issues.");
+        
         ImGui::Unindent();
       }
 
