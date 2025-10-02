@@ -465,7 +465,14 @@ namespace dxvk {
       return;
     }
 
-    const bool isCameraValid = getSceneManager().getCamera().isValid(m_device->getCurrentFrameId());
+    bool isCameraValid = getSceneManager().getCamera().isValid(m_device->getCurrentFrameId());
+    
+    // Force camera validation bypass if requested
+    if (RtxOptions::forceCameraValid() && !isCameraValid) {
+      ONCE(Logger::warn("[RTX-Compatibility] Forcing camera validation to succeed. Camera may not be properly configured!"));
+      isCameraValid = true;
+    }
+    
     if (!isCameraValid) {
       ONCE(Logger::info(str::format("[RTX-Compatibility-Info] Trying to raytrace but not detecting a valid camera.")));
     }

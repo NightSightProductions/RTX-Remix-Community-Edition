@@ -301,7 +301,11 @@ struct RasterGeometry {
   RasterBuffer positionBuffer;
   RasterBuffer normalBuffer;
   RasterBuffer texcoordBuffer;
+  RasterBuffer texcoord1Buffer;     // Second UV set for lightmaps/detail
+  RasterBuffer tangentBuffer;       // Tangent for normal mapping
+  RasterBuffer binormalBuffer;      // Binormal for normal mapping
   RasterBuffer color0Buffer;
+  RasterBuffer color1Buffer;        // Secondary color (specular)
   RasterBuffer indexBuffer;
   RasterBuffer blendWeightBuffer;
   RasterBuffer blendIndicesBuffer;
