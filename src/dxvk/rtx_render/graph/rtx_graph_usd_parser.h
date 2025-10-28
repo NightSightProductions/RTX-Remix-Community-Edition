@@ -96,7 +96,11 @@ private:
       }
       return value.Get<T>();
     } else if (constexpr (std::is_same_v<T, std::string>) && value.IsHolding<pxr::SdfAssetPath>()) {
-      return value.Get<pxr::SdfAssetPath>().GetAssetPath();
+      const std::string resolvedPath = value.Get<pxr::SdfAssetPath>().GetResolvedPath();
+      if (resolvedPath.empty()) {
+        return value.Get<pxr::SdfAssetPath>().GetAssetPath();
+      }
+      return resolvedPath;
     } else if (value.IsHolding<pxr::TfToken>()) {
       // Note: holds_alternative<bool> is a compiler error, so this constexpr check is needed.
       if constexpr (!std::is_same_v<T, bool>) {
@@ -109,7 +113,11 @@ private:
           }
         }
       }
-      return propertyValueFromString(value.Get<pxr::TfToken>().GetString(), spec.type);
+      RtComponentPropertyValue result = propertyValueFromString(value.Get<pxr::TfToken>().GetString(), spec.type);
+      if (result == kInvalidRtComponentPropertyValue) {
+        return spec.defaultValue;
+      }
+      return result;
     } else if (constexpr (std::is_same_v<T, Vector2>) && value.IsHolding<pxr::GfVec2f>()) {
       return Vector2(value.Get<pxr::GfVec2f>().data());
     } else if (constexpr (std::is_same_v<T, Vector3>) && value.IsHolding<pxr::GfVec3f>()) {

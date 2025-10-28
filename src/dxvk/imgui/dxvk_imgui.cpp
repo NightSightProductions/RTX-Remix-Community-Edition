@@ -36,6 +36,7 @@
 #include "dxvk_imgui.h"
 #include "rtx_render/rtx_imgui.h"
 #include "dxvk_device.h"
+#include "rtx_render/graph/rtx_graph_gui.h"
 #include "rtx_render/rtx_utils.h"
 #include "rtx_render/rtx_shader_manager.h"
 #include "rtx_render/rtx_camera.h"
@@ -558,6 +559,14 @@ namespace dxvk {
       {    TerrainMode::AsDecals, "Terrain-as-Decals"},
   });
 
+  static auto themeCombo = ImGui::ComboWithKey<ImGUI::Theme>(
+    "Mode##theme",
+    {
+      {ImGUI::Theme::Toolkit,  "Default Theme"},
+      {ImGUI::Theme::Legacy,   "Legacy Theme"},
+      {ImGUI::Theme::Nvidia,   "NVIDIA Theme"},
+  });
+
   // Styles 
   constexpr ImGuiSliderFlags sliderFlags = ImGuiSliderFlags_AlwaysClamp;
   constexpr ImGuiTreeNodeFlags collapsingHeaderClosedFlags = ImGuiTreeNodeFlags_CollapsingHeader;
@@ -600,7 +609,8 @@ namespace dxvk {
   : m_device (device)
   , m_hwnd   (nullptr)
   , m_about  (new ImGuiAbout)
-  , m_splash  (new ImGuiSplash) {
+  , m_splash  (new ImGuiSplash)
+  , m_graphGUI  (new RtxGraphGUI) {
     // Clamp Option ranges
 
     RTX_OPTION_CLAMP(reflexStatRangeInterpolationRate, 0.0f, 1.0f);
@@ -1114,13 +1124,10 @@ namespace dxvk {
     if (ImGui::Button("Save Settings", ImVec2(buttonWidth, 0))) {
       RtxOptions::serialize();
     }
-    ImGui::SetTooltipToLastWidgetOnHover("This will save above settings in the rtx.conf file. Some may only take effect on next launch.");
 
     ImGui::SameLine();
-    if (ImGui::Button("Reset Settings")) {
-      for (auto& optionLayer : RtxOptionImpl::getRtxOptionLayerMap()) {
-        optionLayer.setEnabled(false);
-      }
+    if (IMGUI_ADD_TOOLTIP(ImGui::Button("Reset settings", ImVec2(buttonWidth, 0)), "Reset all real-time changed settings.")) {
+      RtxOptionLayer::setResetSettings(true);
     }
 
     ImGui::SameLine();
@@ -2071,29 +2078,74 @@ namespace dxvk {
       if (ImGui::CollapsingHeader("Option Layers")) {
         ImGui::Indent();
 
-        if (ImGui::Button("Reset runtime settings")) {
-          // Remove all run-time changed settings
-          RtxOptionLayer::setResetSettings(true);
+        if (IMGUI_ADD_TOOLTIP(ImGui::Button("Disable Layers"), "Reset all settings to Default.")) {
+          for (auto& [priority, optionLayer] : RtxOptionImpl::getRtxOptionLayerMap()) {
+            optionLayer.requestEnabled(false);
+          }
+        }
+
+        ImGui::SameLine();
+        if (IMGUI_ADD_TOOLTIP(ImGui::Button("Enable Layers"), "Enable all option layers.")) {
+          for (auto& [priority, optionLayer] : RtxOptionImpl::getRtxOptionLayerMap()) {
+            optionLayer.requestEnabled(true);
+          }
         }
 
         uint32_t optionLayerCounter = 1;
-        for (auto& optionLayer : RtxOptionImpl::getRtxOptionLayerMap()) {
+        for (auto& [priority, optionLayer] : RtxOptionImpl::getRtxOptionLayerMap()) {
           // Runtime option layer priority is reserved for real-time user changes.
           // These layers should not be modified through the GUI.
-          if (optionLayer.getPriority() != RtxOptionLayer::s_runtimeOptionLayerPriority) {
+          if (priority != RtxOptionLayer::s_runtimeOptionLayerPriority) {
             ImGui::Dummy(ImVec2(0.0f, 5.0f));
-            const std::string optionLayerText = std::to_string(optionLayerCounter++) + ". " + optionLayer.getName();
-            const std::string optionLayerStrengthText = optionLayer.getName() + " Strength";
-            if (ImGui::Checkbox(optionLayerText.c_str(), &optionLayer.isEnabledRef())) {
-              optionLayer.setDirty(true);
+            const std::string optionLayerName = optionLayer.getName();
+            
+            // Process the display name
+            std::string displayName;
+            // construct "rtx-remix/mods/" using OS appropriate separator
+            const std::string modsMarker = (std::filesystem::path("rtx-remix") / "mods" / "").string();
+            size_t modsPos = optionLayerName.find(modsMarker);
+
+            constexpr size_t kLongestPathLength = 30;
+            if (modsPos != std::string::npos) {
+              // Extract portion after "mods/"
+              displayName = optionLayerName.substr(modsPos + modsMarker.length());
+            } else if (optionLayerName.length() > kLongestPathLength) {
+              // Take last 30 characters
+              displayName = "..." + optionLayerName.substr(optionLayerName.length() - kLongestPathLength);
+            } else {
+              displayName = optionLayerName;
+            }
+            
+            const std::string optionLayerText = std::to_string(optionLayerCounter++) + ". " + displayName;
+            const std::string optionLayerStrengthText = " Strength";
+            const std::string optionLayerThresholdText = " Threshold";
+            
+            // Use pending values for UI display and send requests on change
+            bool pendingEnabled = optionLayer.getPendingEnabled();
+            if (IMGUI_ADD_TOOLTIP(ImGui::Checkbox(optionLayerText.c_str(), &pendingEnabled), optionLayer.getName().c_str())) {
+              optionLayer.requestEnabled(pendingEnabled);
             }
 
-            if (IMGUI_ADD_TOOLTIP(ImGui::SliderFloat(optionLayerStrengthText.c_str(), &optionLayer.getBlendStrengthRef(), 0.0f, 1.0f),
+            float pendingStrength = optionLayer.getPendingBlendStrength();
+            if (IMGUI_ADD_TOOLTIP(ImGui::SliderFloat(optionLayerStrengthText.c_str(), &pendingStrength, 0.0f, 1.0f),
                                   "Adjusts the blending strength of this option layer (0 = off, 1 = full effect).")) {
-              optionLayer.setBlendStrengthDirty(true);
+              optionLayer.requestBlendStrength(pendingStrength);
             }
 
-            if (ImGui::CollapsingHeader((optionLayer.getName() + " Details").c_str(), collapsingHeaderClosedFlags)) {
+            float pendingThreshold = optionLayer.getPendingBlendThreshold();
+            if (IMGUI_ADD_TOOLTIP(ImGui::SliderFloat(optionLayerThresholdText.c_str(), &pendingThreshold, 0.0f, 1.0f),
+                                  "Sets the blending strength threshold for this option layer. Only applicable to non-float variables. The option is applied only when the blend strength exceeds this threshold.")) {
+              optionLayer.requestBlendThreshold(pendingThreshold);
+            }
+
+            // Disabled because this blows away the existing settings and replaces it with the current runtime settings.
+            // TODO make this save out the combo of existing settings and runtime settings.
+            // const std::string optionLayerSavingText = "Save realtime changes into layer " + displayName;
+            // if (ImGui::Button(optionLayerSavingText.c_str())) {
+            //   RtxOptions::serializeOptionLayer(optionLayer.getName());
+            // }
+
+            if (ImGui::CollapsingHeader(("Contents of " + displayName).c_str(), collapsingHeaderClosedFlags)) {
               ImGui::Indent();
               const std::string priorityText = "Priority: " + std::to_string(optionLayer.getPriority());
               ImGui::Text(priorityText.c_str());
@@ -2111,6 +2163,51 @@ namespace dxvk {
               ImGui::Unindent();
             }
           }
+        }
+
+        ImGui::Unindent();
+      }
+
+      if (ImGui::CollapsingHeader("UI Options")) {
+        ImGui::Indent();
+
+        if (m_pendingUIOptionsScroll) {
+          ImGui::SetScrollHereY(0.0f);
+          m_pendingUIOptionsScroll = false;
+        }
+
+        {
+          if (ImGui::Checkbox("Compact UI", &compactGuiObject())) {
+            // Scroll to UI Options on the next frame
+            m_pendingUIOptionsScroll = true;
+          }
+        }
+
+        ImGui::Checkbox("Always Developer Menu", &RtxOptions::defaultToAdvancedUIObject());
+
+        if (ImGui::SliderFloat("Background Alpha", &backgroundAlphaObject(), 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
+          adjustStyleBackgroundAlpha(backgroundAlpha());
+        }
+
+        
+        if (ImGui::Checkbox("Use Large UI", &largeUiModeObject())) {
+          m_pendingUIOptionsScroll = true;
+        }
+        
+
+        {
+          constexpr float indent = 60.0f;
+          ImGui::PushID("gui theme");
+          ImGui::Dummy(ImVec2(0, 2));
+          ImGui::Text("GUI Theme:");
+          ImGui::PushItemWidth(ImGui::GetContentRegionMax().x - indent);
+
+          if (themeCombo.getKey(&themeGuiObject())) {
+            m_pendingUIOptionsScroll = true;
+          }
+
+          ImGui::PopItemWidth();
+          ImGui::PopID();
         }
 
         ImGui::Unindent();
@@ -2472,7 +2569,7 @@ namespace dxvk {
     // should be in sync with post_fx_highlight.comp.slang::highlightIntensity(),
     // so animation of post-effect highlight and UI are same
     float animatedHighlightIntensity(uint64_t timeSinceStartMS) {
-      const float ymax = 0.65f;
+      constexpr float ymax = 0.65f;
       float t10 = 1.0f - fract(static_cast<float>(timeSinceStartMS) / 1000.0f);
       return clamp(t10 > ymax ? t10 - (1.0f - ymax) : t10, 0.0f, 1.0f) / ymax;
     }
@@ -2719,6 +2816,14 @@ namespace dxvk {
     if(ImGui::CollapsingHeader("Enhancements", collapsingHeaderFlags | ImGuiTreeNodeFlags_DefaultOpen)) {
       ImGui::Indent();
       showEnhancementsTab(ctx);
+      ImGui::Unindent();
+    }
+    
+    // Graph Visualization Section
+    ImGui::Separator();
+    if (ImGui::CollapsingHeader("Graph Visualization", ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::Indent();
+      m_graphGUI->showGraphVisualization(ctx);
       ImGui::Unindent();
     }
   }
@@ -4268,7 +4373,7 @@ namespace dxvk {
 
       ImGui::Checkbox("Use White Material Textures", &RtxOptions::useWhiteMaterialModeObject());
       ImGui::Separator();
-      const float kMipBiasRange = 32;
+      constexpr float kMipBiasRange = 32;
       ImGui::DragFloat("Mip LOD Bias", &RtxOptions::nativeMipBiasObject(), 0.01f, -kMipBiasRange, kMipBiasRange, "%.2f", sliderFlags);
       ImGui::DragFloat("Upscaling LOD Bias", &RtxOptions::upscalingMipBiasObject(), 0.01f, -kMipBiasRange, kMipBiasRange, "%.2f", sliderFlags);
       ImGui::Separator();

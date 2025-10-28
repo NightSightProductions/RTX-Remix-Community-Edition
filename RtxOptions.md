@@ -103,6 +103,7 @@ Tables below enumerate all the options and their defaults set by RTX Remix. Note
 |rtx.camera.freeCameraViewRelative|bool|True|||Free camera transform is relative to the view\.|
 |rtx.camera.freeCameraYaw|float|0|||Free camera's position\.|
 |rtx.camera.lockFreeCamera|bool|False|||Locks free camera\.|
+|rtx.camera.useFreeCameraForComponents|bool|True|||Use free camera for graph components when free camera is enabled\.|
 |rtx.cameraAnimationAmplitude|float|2|||Amplitude of the free camera's animation\.|
 |rtx.cameraAnimationMode|int|3|||Free camera's animation mode\.|
 |rtx.cameraJitterSequenceLength|int|64|||Sets a camera jitter sequence length \[number of frames\]\. It will loop around once the length is reached\.|
@@ -303,12 +304,16 @@ Tables below enumerate all the options and their defaults set by RTX Remix. Note
 |rtx.freeCameraTurningSpeed|float|1|||Free camera turning speed \(applies to keyboard, not mouse\) \[radians/s\]\.|
 |rtx.fusedWorldViewMode|int|0|||Set if game uses a fused World\-View transform matrix\.|
 |rtx.graphicsPreset|int|5|||Overall rendering preset, higher presets result in higher image quality, lower presets result in better performance\.|
+|rtx.gui.backgroundAlpha|float|0.9|0|1|A value controlling the alpha of the GUI background\.|
+|rtx.gui.compactGui|bool|False|||A setting to toggle between compact and spacious GUI modes\.|
 |rtx.gui.hudMessageAnimatedDotDurationMilliseconds|int|1000|||A duration in milliseconds between each dot in the animated dot sequence for HUD messages\. Must be greater than 0\.<br>These dots help indicate progress is happening to the user with a bit of animation which can be configured to animate at whatever speed is desired\.|
+|rtx.gui.largeUiMode|bool|False|||Toggles between Large and Regular GUI Scale Modes\.|
 |rtx.gui.legacyTextureGuiShowAssignedOnly|bool|False|||A setting to show only the textures in a category that are assigned to it \(Unassigned textures are found in the new "Uncategorized" list at the top\)\.<br>Requires: 'Split Texture Category List' option to be enabled\.|
 |rtx.gui.reflexStatRangeInterpolationRate|float|0.05|||A value controlling the interpolation rate applied to the Reflex stat graph ranges for smoother visualization\.|
 |rtx.gui.reflexStatRangePaddingRatio|float|0.05|||A value specifying the amount of padding applied to the Reflex stat graph ranges as a ratio to the calculated range\.|
 |rtx.gui.showLegacyTextureGui|bool|False|||A setting to toggle the old texture selection GUI, where each texture category is represented as its own list\.|
 |rtx.gui.textureGridThumbnailScale|float|1|||A float to set the scale of thumbnails while selecting textures\.<br>This will be scaled by the default value of 120 pixels\.<br>This value must always be greater than zero\.|
+|rtx.gui.themeGui|int|0|||A setting controlling the active GUI theme\.|
 |rtx.hashCollisionDetection.enable|bool|False|||Enables hash collision detection\.|
 |rtx.hideSplashMessage|bool|False|||A flag to disable the splash message indicating how to use Remix from appearing when the application starts\.<br>When set to true this message will be hidden, otherwise it will be displayed on every launch\.|
 |rtx.ignoreAllVertexColorBakedLighting|bool|False|||If true, all baked lighting bound to all vertex colors will be ignored\.|
@@ -894,7 +899,7 @@ Tables below enumerate all the options and their defaults set by RTX Remix. Note
 |rtx.baseGameModRegex|string||||Regex used to determine if the base game is running a mod, like a sourcemod\.|
 |rtx.beamTextures|hash set||||Textures on draw calls that are already particles or emissively blended and have beam\-like geometry\.<br>Typically objects marked as particles or objects using emissive blending will be rendered with a special method which allows re\-orientation of the billboard geometry assumed to make up the draw call in indirect rays \(reflections for example\)\.<br>This method works fine for typical particles, but some \(e\.g\. a laser beam\) may not be well\-represented with the typical billboard assumption of simply needing to rotate around its centroid to face the view direction\.<br>To handle such cases a different beam mode is used to treat objects as more of a cylindrical beam and re\-orient around its main spanning axis, allowing for better rendering of these beam\-like effect objects\.|
 |rtx.cameraSequence.filePath|string||||File path\.|
-|rtx.captureHotKey|virtual keys|CTRL + SHFT + Q|||Hotkey to trigger a capture without bringing up the menu\.<br>example override: 'rtx\.captureHotKey = CTRL, SHIFT, P'\.<br>Full list of key names available in \`src/util/util\_keybind\.h\`\.|
+|rtx.captureHotKey|virtual keys|CTRL,SHFT,Q|||Hotkey to trigger a capture without bringing up the menu\.<br>example override: 'rtx\.captureHotKey = CTRL, SHIFT, P'\.<br>Full list of key names available in \`src/util/util\_keybind\.h\`\.|
 |rtx.captureInstanceStageName|string|capture_{timestamp}.usd|||Name of the 'instance' stage \(see: 'rtx\.captureInstances'\)\.|
 |rtx.captureTimestampReplacement|string|{timestamp}|||String that can be used for auto\-replacing current time stamp in instance stage name\.<br>Note: Changing this value does not change the default value for rtx\.captureInstanceStageName\.|
 |rtx.decalTextures|hash set||||Textures on draw calls used for static geometric decals or decals with complex topology\.<br>These materials will be blended over the materials underneath them when decal material blending is enabled\.<br>A small configurable offset is applied to each flat/co\-planar part of these decals to prevent coplanar geometric cases \(which poses problems for ray tracing\)\.|
@@ -930,7 +935,7 @@ Tables below enumerate all the options and their defaults set by RTX Remix. Note
 |rtx.postfx.motionBlurMaskOutTextures|hash set||||Disable motion blur for meshes with specific texture\.|
 |rtx.rayPortalModelTextureHashes|hash vector||||Texture hashes identifying ray portals\. Allowed number of hashes: \{0, 2\}\.|
 |rtx.raytracedRenderTargetTextures|hash set||||DescriptorHashes for Render Targets\. \(Screens that should display the output of another camera\)\.|
-|rtx.remixMenuKeyBinds|virtual keys|ALT + X|||Hotkey to open the Remix menu\.<br>example override: 'rtx\.remixMenuKeyBinds = CTRL, SHIFT, Z'\.<br>Full list of key names available in \`src/util/util\_keybind\.h\`\.|
+|rtx.remixMenuKeyBinds|virtual keys|ALT,X|||Hotkey to open the Remix menu\.<br>example override: 'rtx\.remixMenuKeyBinds = CTRL, SHIFT, Z'\.<br>Full list of key names available in \`src/util/util\_keybind\.h\`\.|
 |rtx.singleOffsetDecalTextures|hash set||||Warning: This option is deprecated, please use rtx\.decalTextures instead\.<br>Textures on draw calls used for geometric decals that don't inter\-overlap for a given texture hash\. Textures must be tagged as "Decal Texture" or "Dynamic Decal Texture" to apply\.<br>Applies a single shared offset to all the batched decal geometry rendered in a given draw call, rather than increasing offset per decal within the batch \(i\.e\. a quad in case of "Dynamic Decal Texture"\)\.<br>Note, the offset adds to the global offset among all decals drawn with different draw calls\.<br>The decal textures tagged this way must not inter\-overlap within a batch / single draw call since the same offset is applied to all of them\.<br>Applying a single offset is useful for stabilizing decal offsets when a game dynamically batches decals together\.<br>In addition, it makes the global decal offset index grow slower and thus it minimizes a chance of hitting the "rtx\.decals\.maxOffsetIndex limit"\.|
 |rtx.skyBoxGeometries|hash set||||Geometries from draw calls used for the sky or are otherwise intended to be very far away from the camera at all times \(no parallax\)\.<br>Any draw calls using a geometry hash in this list will be treated as sky and rendered as such in a manner different from typical geometry\.<br>The geometry hash being used for sky detection is based off of the asset hash rule, see: "rtx\.geometryAssetHashRuleString"\.|
 |rtx.skyBoxTextures|hash set||||Textures on draw calls used for the sky or are otherwise intended to be very far away from the camera at all times \(no parallax\)\.<br>Any draw calls using a texture in this list will be treated as sky and rendered as such in a manner different from typical geometry\.|
