@@ -167,6 +167,7 @@ namespace dxvk {
     {"uitextures", "UI Texture", &RtxOptions::uiTexturesObject()},
     {"worldspaceuitextures", "World Space UI Texture", &RtxOptions::worldSpaceUiTexturesObject()},
     {"worldspaceuibackgroundtextures", "World Space UI Background Texture", &RtxOptions::worldSpaceUiBackgroundTexturesObject()},
+    {"legacyemissivetextures", "Legacy Emissive Texture", &RtxOptions::legacyEmissiveTexturesObject()},
     {"skytextures", "Sky Texture", &RtxOptions::skyBoxTexturesObject()},
     {"ignoretextures", "Ignore Texture (optional)", &RtxOptions::ignoreTexturesObject()},
     {"hidetextures", "Hide Texture Instance (optional)", &RtxOptions::hideInstanceTexturesObject()},
@@ -333,6 +334,7 @@ namespace dxvk {
       {UpscalerType::None, "None"},
       {UpscalerType::NIS, "NIS"},
       {UpscalerType::TAAU, "TAA-U"},
+      {UpscalerType::XeSS, "XeSS"},
   } });
 
   static auto upscalerDLSSCombo = ImGui::ComboWithKey<UpscalerType>(
@@ -342,6 +344,7 @@ namespace dxvk {
       {UpscalerType::DLSS, "DLSS"},
       {UpscalerType::NIS, "NIS"},
       {UpscalerType::TAAU, "TAA-U"},
+      {UpscalerType::XeSS, "XeSS"},
   } });
 
   ImGui::ComboWithKey<DlssPreset> dlssPresetCombo{
@@ -383,6 +386,20 @@ namespace dxvk {
         {TaauPreset::Balanced, "Balanced"},
         {TaauPreset::Quality, "Quality"},
         {TaauPreset::Fullscreen, "Fullscreen"},
+    } }
+  };
+
+  ImGui::ComboWithKey<XeSSProfile> xessProfileCombo{
+    "XeSS Profile",
+    ImGui::ComboWithKey<XeSSProfile>::ComboEntries{ {
+        {XeSSProfile::UltraPerf, "Ultra Performance"},
+        {XeSSProfile::Performance, "Performance"},
+        {XeSSProfile::Balanced, "Balanced"},
+        {XeSSProfile::Quality, "Quality"},
+        {XeSSProfile::UltraQuality, "Ultra Quality"},
+        {XeSSProfile::UltraQualityPlus, "Ultra Quality Plus"},
+        {XeSSProfile::NativeAA, "Native Anti-Aliasing"},
+        {XeSSProfile::Custom, "Custom"},
     } }
   };
 
@@ -467,6 +484,7 @@ namespace dxvk {
       { RtxFramePassStage::DLSS, "DLSS" },
       { RtxFramePassStage::DLSSRR, "DLSSRR" },
       { RtxFramePassStage::NIS, "NIS" },
+      { RtxFramePassStage::XeSS, "XeSS" },
       { RtxFramePassStage::TAA, "TAA" },
       { RtxFramePassStage::DustParticles, "DustParticles" },
       { RtxFramePassStage::Bloom, "Bloom" },
@@ -1100,11 +1118,10 @@ namespace dxvk {
     ImGui::Dummy(ImVec2(0, 2));
 
     ImGui::Checkbox("Save Changed Settings Only", &RtxOptions::serializeChangedOptionOnlyObject());
+
     const float buttonWidth = ImGui::GetContentRegionAvail().x / 3 - (ImGui::GetStyle().ItemSpacing.x);
 
-    if (IMGUI_ADD_TOOLTIP(ImGui::Button("Save Settings", ImVec2(buttonWidth, 0)), "Changes are now saved to user.conf. Use the 'Save' button in the rtx.conf layer if you want to store them there for sharing.")) {
-
-
+    if (ImGui::Button("Save Settings", ImVec2(buttonWidth, 0))) {
       RtxOptions::serialize();
     }
 
@@ -1151,8 +1168,8 @@ namespace dxvk {
     // - Checking to ensure text including less visible instances from hover tooltips and etc do not take up more
     // lines such that empty text lines become ineffective (to prevent jittering when text changes).
     // - Updating Dummy elements as they currently are based on half the y padding for spacing consistency.
-    constexpr float windowPaddingX = 74.0f;
-    constexpr float windowPaddingHalfX = windowPaddingX * 0.5f;
+    const float windowPaddingX = 74.0f;
+    const float windowPaddingHalfX = windowPaddingX * 0.5f;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(windowPaddingX, 10));
 
     // Use the same background color and alpha as other menus, PopupBg has alpha 1 because it's used for combobox popups etc. 
@@ -1168,7 +1185,7 @@ namespace dxvk {
       // Always display memory stats to user.
       showMemoryStats();
 
-      const int itemWidth = static_cast<int>(largeUiMode() ? m_largeUserWindowWidgeWidth : m_regularUserWindowWidgetWidth);
+      const int itemWidth = static_cast<int>(m_largeUIMode ? m_largeUserWindowWidgeWidth : m_regularUserWindowWidgeWidth);
       const int subItemWidth = static_cast<int>(ImCeil(itemWidth * 0.86f));
       const int subItemIndent = (itemWidth > subItemWidth) ? (itemWidth - subItemWidth) : 0;
 
@@ -1409,9 +1426,28 @@ namespace dxvk {
 
           break;
         }
-        case UpscalerType::None:
+        case UpscalerType::XeSS: {
+          m_userGraphicsSettingChanged |= xessProfileCombo.getKey(&RtxOptions::xessProfileObject());
+
+          // Show resolution slider only for Custom preset
+          if (RtxOptions::xessProfile() == XeSSProfile::Custom) {
+            m_userGraphicsSettingChanged |= ImGui::SliderFloat("Resolution Scale", &RtxOptions::resolutionScaleObject(), 0.1f, 1.0f, "%.2f");
+          }
+
+          // Display XeSS internal resolution
+          auto& xess = ctx->getCommonObjects()->metaXeSS();
+
+          uint32_t inputWidth;
+          uint32_t inputHeight;
+          xess.getInputSize(inputWidth, inputHeight);
+          ImGui::TextWrapped(str::format("Internal Resolution: ", inputWidth, "x", inputHeight).c_str());
+
+          break;
+        }
+        case UpscalerType::None: {
           // No custom UI here.
           break;
+        }
       }
 
       ImGui::Unindent(static_cast<float>(subItemIndent));
@@ -1778,7 +1814,7 @@ namespace dxvk {
   }
 
   void ImGUI::showDevelopmentSettings(const Rc<DxvkContext>& ctx) {
-    ImGui::PushItemWidth((largeUiMode() ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth) + 50.0f);
+    ImGui::PushItemWidth((m_largeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth) + 50.0f);
     if (ImGui::Button("Take Screenshot")) {
       RtxContext::triggerScreenshot();
     }
@@ -2178,6 +2214,67 @@ namespace dxvk {
       }
     }
 
+    if (ImGui::CollapsingHeader("UI Options")) {
+      ImGui::Indent();
+
+      if (m_pendingUIOptionsScroll) {
+        ImGui::SetScrollHereY(0.0f);
+        m_pendingUIOptionsScroll = false;
+      }
+     
+      {
+        if (ImGui::Checkbox("Compact UI", &m_compactUIMode)) {
+          compactGui.setDeferred(m_compactUIMode);
+          setupStyle();
+
+          // Scroll to UI Options on the next frame
+          m_pendingUIOptionsScroll = true;
+        }
+      }
+
+      ImGui::Checkbox("Always Developer Menu", &RtxOptions::defaultToAdvancedUIObject());
+
+      if (ImGui::SliderFloat("Background Alpha", &m_backgroundAlpha, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
+        backgroundAlpha.setDeferred(m_backgroundAlpha);
+        adjustStyleBackgroundAlpha(m_backgroundAlpha);
+      }
+
+      {
+        if (IMGUI_ADD_TOOLTIP(ImGui::Button(m_largeUIMode ? "Switch to Regular UI" : "Switch to Large UI", ImVec2(ImGui::CalcItemWidth(), 0)),
+                              "Toggles between Large and Regular GUI Scale Modes. This option will not be serialized and saved.")) {
+          m_largeUIMode = !m_largeUIMode;
+
+          ImGui::GetIO().FontDefault = m_largeUIMode ? m_largeFont : m_regularFont;
+          updateWindowWidths();
+
+          // Scroll to UI Options on the next frame
+          m_pendingUIOptionsScroll = true;
+        }
+      }
+
+      {
+        const float indent = 60.0f;
+        ImGui::PushID("gui theme");
+        ImGui::Dummy(ImVec2(0, 2));
+        ImGui::Text("GUI Theme:");
+        ImGui::PushItemWidth(ImGui::GetContentRegionMax().x - indent);
+        if (ImGui::ListBox("", (int*)&m_currTheme, &themeNames[0], Theme::kTheme_Count, 3)) {
+          themeGui.setDeferred(m_currTheme);
+          setupStyle();
+        }
+        ImGui::PopItemWidth();
+
+        /*if (ImGui::Button("Apply##gui_theme", ImVec2(ImGui::GetContentRegionMax().x - indent, 0))) {
+          setupStyle();
+          themeGui.setDeferred(m_currTheme);
+        }*/
+
+        ImGui::PopID();
+      }
+
+      ImGui::Unindent();
+    }
+
     ImGui::PopItemWidth();
   }
 
@@ -2325,6 +2422,107 @@ namespace dxvk {
               }
               if (IMGUI_ADD_TOOLTIP(ImGui::Checkbox(rtxOption.displayName, &rtxOption.bufferToggle), rtxOption.textureSetOption->getDescription())) {
                 toggleTextureSelection(texHash, rtxOption.uniqueId, rtxOption.textureSetOption);
+              }
+              
+              // Show emissive strength control for Legacy Emissive Texture
+              if (strcmp(rtxOption.uniqueId, "legacyemissivetextures") == 0 && rtxOption.bufferToggle) {
+                ImGui::Indent();
+                
+                // Get current intensity for this specific texture
+                auto legacyEmissiveIntensities = RtxOptions::parseLegacyEmissiveIntensities(RtxOptions::legacyEmissiveIntensitiesString());
+                float currentIntensity = 2.0f; // Default intensity
+                auto intensityIt = legacyEmissiveIntensities.find(texHash);
+                if (intensityIt != legacyEmissiveIntensities.end()) {
+                  currentIntensity = intensityIt->second;
+                }
+                
+                ImGui::Text("Emissive Strength:");
+                ImGui::PushItemWidth(150.0f);
+                if (ImGui::DragFloat("##emissive_strength", &currentIntensity, 0.1f, 0.0f, 20.0f, "%.1f")) {
+                  // Update the intensity for this texture
+                  legacyEmissiveIntensities[texHash] = currentIntensity;
+                  std::string intensityString = RtxOptions::legacyEmissiveIntensitiesToString(legacyEmissiveIntensities);
+                  RtxOptions::legacyEmissiveIntensitiesStringObject().setDeferred(intensityString);
+                }
+                ImGui::PopItemWidth();
+                
+                if (ImGui::IsItemHovered()) {
+                  ImGui::SetTooltip("Controls the brightness of emissive glow for this texture (default: 2.0)");
+                }
+                
+                // Reset button
+                ImGui::SameLine();
+                if (ImGui::Button("Reset##emissive_reset")) {
+                  legacyEmissiveIntensities.erase(texHash);
+                  std::string intensityString = RtxOptions::legacyEmissiveIntensitiesToString(legacyEmissiveIntensities);
+                  RtxOptions::legacyEmissiveIntensitiesStringObject().setDeferred(intensityString);
+                }
+                if (ImGui::IsItemHovered()) {
+                  ImGui::SetTooltip("Reset to default intensity (2.0)");
+                }
+                
+                // Get current color tint for this specific texture
+                auto legacyEmissiveColors = RtxOptions::parseLegacyEmissiveColors(RtxOptions::legacyEmissiveColorsString());
+                Vector3 currentColor = Vector3(1.0f, 1.0f, 1.0f); // Default white
+                auto colorIt = legacyEmissiveColors.find(texHash);
+                if (colorIt != legacyEmissiveColors.end()) {
+                  currentColor = colorIt->second;
+                }
+                
+                // Convert Vector3 to float array for ImGui color picker
+                float colorArray[3] = { currentColor.x, currentColor.y, currentColor.z };
+                
+                ImGui::Text("Emissive Color Tint:");
+                ImGui::PushItemWidth(150.0f);
+                if (ImGui::ColorEdit3("##emissive_color", colorArray, ImGuiColorEditFlags_NoInputs)) {
+                  // Update the color map
+                  legacyEmissiveColors[texHash] = Vector3(colorArray[0], colorArray[1], colorArray[2]);
+                  
+                  // Convert back to string and save
+                  std::string colorString = RtxOptions::legacyEmissiveColorsToString(legacyEmissiveColors);
+                  RtxOptions::legacyEmissiveColorsStringObject().setDeferred(colorString);
+                  
+                  // DEBUG: Log the color string being saved
+                  char hashStr[32];
+                  sprintf_s(hashStr, "%016llX", texHash);
+                  Logger::info(str::format("DEBUG ImGui: Setting color tint for hash ", hashStr, " -> color string: ", colorString));
+                }
+                ImGui::PopItemWidth();
+                
+                if (ImGui::IsItemHovered()) {
+                  ImGui::SetTooltip("Tints the emissive glow color for this texture (default: white)");
+                }
+                
+                // Color reset button
+                ImGui::SameLine();
+                if (ImGui::Button("Reset##color_reset")) {
+                  legacyEmissiveColors.erase(texHash);
+                  std::string colorString = RtxOptions::legacyEmissiveColorsToString(legacyEmissiveColors);
+                  RtxOptions::legacyEmissiveColorsStringObject().setDeferred(colorString);
+                }
+                if (ImGui::IsItemHovered()) {
+                  ImGui::SetTooltip("Reset to default color (white)");
+                }
+                
+                // Alpha invert toggle for Legacy Emissive Texture
+                auto legacyEmissiveAlphaInvert = RtxOptions::parseLegacyEmissiveAlphaInvert(RtxOptions::legacyEmissiveAlphaInvertString());
+                bool currentAlphaInvert = legacyEmissiveAlphaInvert.find(texHash) != legacyEmissiveAlphaInvert.end();
+                
+                if (ImGui::Checkbox("Invert Alpha Mask", &currentAlphaInvert)) {
+                  // Update the alpha invert set
+                  if (currentAlphaInvert) {
+                    legacyEmissiveAlphaInvert.insert(texHash);
+                  } else {
+                    legacyEmissiveAlphaInvert.erase(texHash);
+                  }
+                  std::string invertString = RtxOptions::legacyEmissiveAlphaInvertToString(legacyEmissiveAlphaInvert);
+                  RtxOptions::legacyEmissiveAlphaInvertStringObject().setDeferred(invertString);
+                }
+                if (ImGui::IsItemHovered()) {
+                  ImGui::SetTooltip("When enabled: black alpha = full emission, white alpha = no emission\nWhen disabled: black alpha = no emission, white alpha = full emission");
+                }
+                
+                ImGui::Unindent();
               }
             }
             ImGui::EndPopup();
@@ -2611,7 +2809,7 @@ namespace dxvk {
   }
 
   void ImGUI::showEnhancementsWindow(const Rc<DxvkContext>& ctx) {
-    ImGui::PushItemWidth(largeUiMode() ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
+    ImGui::PushItemWidth(m_largeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
 
     m_capture->show(ctx);
     
@@ -2716,7 +2914,7 @@ namespace dxvk {
     if (!ImGui::BeginTabBar("##showSetupWindow", tab_bar_flags)) {
       return;
     }
-    ImGui::PushItemWidth(largeUiMode() ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
+    ImGui::PushItemWidth(m_largeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
 
     texture_popup::lastOpenCategoryActive = false;
 
@@ -2854,6 +3052,7 @@ namespace dxvk {
         ImGui::Indent();
         ImGui::DragFloat("Force Cutout Alpha", &RtxOptions::forceCutoutAlphaObject(), 0.01f, 0.0f, 1.0f, "%.3f", sliderFlags);
         ImGui::DragFloat("World Space UI Background Offset", &RtxOptions::worldSpaceUiBackgroundOffsetObject(), 0.01f, -FLT_MAX, FLT_MAX, "%.3f", sliderFlags);
+
         ImGui::Checkbox("Ignore last texture stage", &RtxOptions::ignoreLastTextureStageObject());
         ImGui::Checkbox("Enable Multiple Stage Texture Factor Blending", &RtxOptions::enableMultiStageTextureFactorBlendingObject());
         ImGui::Unindent();
@@ -2995,25 +3194,77 @@ namespace dxvk {
 
   void ImGUI::updateWindowWidths() {
     // Developer menu
-    m_windowWidth = largeUiMode() ? m_largeWindowWidth : m_regularWindowWidth + (compactGui() ? 0.0f : 42.0f);
+    m_windowWidth = m_largeUIMode ? m_largeWindowWidth : m_regularWindowWidth + (m_compactUIMode ? 0.0f : 42.0f);
 
     // User menu popup
-    m_userWindowWidth = largeUiMode() ? m_largeUserWindowWidth : m_regularUserWindowWidth;
-    m_userWindowHeight = largeUiMode() ? m_largeUserWindowHeight : m_regularUserWindowHeight;
+    m_userWindowWidth = m_largeUIMode ? m_largeUserWindowWidth : m_regularUserWindowWidth;
+    m_userWindowHeight = m_largeUIMode ? m_largeUserWindowHeight : m_regularUserWindowHeight;
   }
 
-  void ImGUI::setToolkitStyle(ImGuiStyle* dst) {
+  void ImGUI::setDefaultStyle(ImGuiStyle* dst) {
+    ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
+
+    // Original ImGui theme from ImGuiStyle::ImGuiStyle()
+    style->Alpha = 1.0f;
+    style->DisabledAlpha = 0.60f;
+    style->WindowPadding = ImVec2(8, 8);
+    style->WindowRounding = 0.0f;
+    style->WindowBorderSize = 1.0f;
+    style->WindowMinSize = ImVec2(32, 32);
+    style->WindowTitleAlign = ImVec2(0.0f, 0.5f);
+    style->WindowMenuButtonPosition = ImGuiDir_Left;
+    style->ChildRounding = 0.0f;
+    style->ChildBorderSize = 1.0f;
+    style->PopupRounding = 0.0f;
+    style->PopupBorderSize = 1.0f;
+    style->FramePadding = m_compactUIMode ? ImVec2(4, 3) : ImVec2(7, 5);
+    style->FrameRounding = 0.0f;
+    style->FrameBorderSize = 0.0f;
+    style->ItemSpacing = m_compactUIMode ? ImVec2(8, 4) : ImVec2(3, 5);
+    style->ItemInnerSpacing = m_compactUIMode ? ImVec2(4, 4) : ImVec2(3, 8);
+    style->CellPadding = ImVec2(4, 2);
+    style->TouchExtraPadding = ImVec2(0, 0);
+    style->IndentSpacing = 21.0f;
+    style->ColumnsMinSpacing = 6.0f;
+    style->ScrollbarSize = 14.0f;
+    style->ScrollbarRounding = 9.0f;
+    style->GrabMinSize = 10.0f;
+    style->GrabRounding = 0.0f;
+    style->LogSliderDeadzone = 4.0f;
+    style->TabRounding = 4.0f;
+    style->TabBorderSize = 0.0f;
+    style->TabMinWidthForCloseButton = 0.0f;
+    style->ColorButtonPosition = ImGuiDir_Right;
+    style->ButtonTextAlign = ImVec2(0.5f, 0.5f);
+    style->SelectableTextAlign = ImVec2(0.0f, 0.0f);
+    style->DisplayWindowPadding = ImVec2(19, 19);
+    style->DisplaySafeAreaPadding = ImVec2(3, 3);
+    style->MouseCursorScale = 1.0f;
+    style->AntiAliasedLines = true;
+    style->AntiAliasedLinesUseTex = true;
+    style->AntiAliasedFill = true;
+    style->CurveTessellationTol = 1.25f;
+    style->CircleTessellationMaxError = 0.30f;
+    ImGui::StyleColorsDark(style);
+
+    // Remix changes
+    style->Colors[ImGuiCol_WindowBg] = ImVec4(0.f, 0.f, 0.f, m_backgroundAlpha);
+    style->Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.f, 0.f, 0.f, 0.4f);
+    style->TabRounding = 1;
+  }
+
+  void ImGUI::setToolkitInspiredStyle(ImGuiStyle* dst) {
     ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
 
     style->Alpha = 1.0f;
     style->DisabledAlpha = 0.5f;
 
     style->WindowPadding = ImVec2(8.0f, 10.0f);
-    style->FramePadding = compactGui() ? ImVec2(4.0f, 3.0f) : ImVec2(7.0f, 5.0f);
+    style->FramePadding = m_compactUIMode ? ImVec2(4.0f, 3.0f) : ImVec2(7.0f, 5.0f);
     style->CellPadding = ImVec2(5.0f, 4.0f);
-    style->ItemSpacing = compactGui() ? ImVec2(8.0f, 4.0f) : ImVec2(3.0f, 5.0f);
-    style->ItemInnerSpacing = compactGui() ? ImVec2(4.0f, 4.0f) : ImVec2(3.0f, 8.0f);
-    style->IndentSpacing = 10.0f;
+    style->ItemSpacing = m_compactUIMode ? ImVec2(8.0f, 4.0f) : ImVec2(3.0f, 5.0f);
+    style->ItemInnerSpacing = m_compactUIMode ? ImVec2(4.0f, 4.0f) : ImVec2(3.0f, 8.0f);
+    style->IndentSpacing = 8.0f;
     style->ColumnsMinSpacing = 10.0f;
     style->ScrollbarSize = 15.0f;
     style->GrabMinSize = 10.0f;
@@ -3041,31 +3292,31 @@ namespace dxvk {
     style->DisplaySafeAreaPadding = ImVec2(3, 3);
     style->MouseCursorScale = 1.0f;
 
-    style->Colors[ImGuiCol_WindowBg] = ImVec4(0.19f, 0.19f, 0.19f, backgroundAlpha());
-    style->Colors[ImGuiCol_PopupBg] = ImVec4(0.19f, 0.19f, 0.19f, 1.00f);
-    style->Colors[ImGuiCol_Text] = ImVec4(0.76f, 0.76f, 0.76f, 1.00f);
+    style->Colors[ImGuiCol_WindowBg] = ImVec4(0.26f, 0.26f, 0.26f, m_backgroundAlpha);
+    style->Colors[ImGuiCol_PopupBg] = ImVec4(0.28f, 0.28f, 0.28f, 1.00f);
+    style->Colors[ImGuiCol_Text] = ImVec4(0.90f, 0.90f, 0.90f, 1.00f);
     style->Colors[ImGuiCol_TextDisabled] = ImVec4(0.44f, 0.44f, 0.44f, 1.00f);
-    style->Colors[ImGuiCol_ChildBg] = ImVec4(0.16f, 0.16f, 0.16f, 0.86f);
-    style->Colors[ImGuiCol_Border] = ImVec4(0.34f, 0.34f, 0.34f, 0.86f);
-    style->Colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    style->Colors[ImGuiCol_ChildBg] = ImVec4(0.19f, 0.19f, 0.19f, 0.80f);
+    style->Colors[ImGuiCol_Border] = ImVec4(0.31f, 0.31f, 0.31f, 1.00f);
+    style->Colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.23f);
     style->Colors[ImGuiCol_FrameBg] = ImVec4(0.19f, 0.19f, 0.19f, 1.00f);
-    style->Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.15f, 0.30f, 0.35f, 1.00f);
-    style->Colors[ImGuiCol_FrameBgActive] = ImVec4(0.10f, 0.15f, 0.16f, 0.59f);
-    style->Colors[ImGuiCol_TitleBg] = ImVec4(0.06f, 0.06f, 0.06f, 1.00f);
-    style->Colors[ImGuiCol_TitleBgActive] = ImVec4(0.06f, 0.06f, 0.06f, 1.00f);
+    style->Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.17f, 0.25f, 0.27f, 1.00f);
+    style->Colors[ImGuiCol_FrameBgActive] = ImVec4(0.07f, 0.39f, 0.47f, 0.59f);
+    style->Colors[ImGuiCol_TitleBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.98f);
+    style->Colors[ImGuiCol_TitleBgActive] = ImVec4(0.15f, 0.15f, 0.15f, 0.98f);
     style->Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.15f, 0.15f, 0.15f, 0.98f);
     style->Colors[ImGuiCol_MenuBarBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     style->Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.24f);
-    style->Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.25f, 0.25f, 0.25f, 1.00f);
-    style->Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.31f, 0.31f, 0.31f, 0.78f);
+    style->Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.34f, 0.34f, 0.34f, 0.39f);
+    style->Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.54f, 0.54f, 0.54f, 0.47f);
     style->Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.78f, 0.78f, 0.78f, 0.33f);
-    style->Colors[ImGuiCol_CheckMark] = ImVec4(0.53f, 0.53f, 0.53f, 1.00f);
+    style->Colors[ImGuiCol_CheckMark] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
     style->Colors[ImGuiCol_SliderGrab] = ImVec4(1.00f, 1.00f, 1.00f, 0.39f);
-    style->Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.10f, 0.46f, 0.56f, 1.00f);
+    style->Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.00f, 1.00f, 1.00f, 0.31f);
     style->Colors[ImGuiCol_Button] = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
-    style->Colors[ImGuiCol_ButtonHovered] = ImVec4(0.27f, 0.27f, 0.27f, 1.00f);
-    style->Colors[ImGuiCol_ButtonActive] = ImVec4(0.40f, 0.44f, 0.45f, 1.00f);
-    style->Colors[ImGuiCol_Header] = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
+    style->Colors[ImGuiCol_ButtonHovered] = ImVec4(0.17f, 0.25f, 0.27f, 0.78f);
+    style->Colors[ImGuiCol_ButtonActive] = ImVec4(0.21f, 0.30f, 0.33f, 0.78f);
+    style->Colors[ImGuiCol_Header] = ImVec4(0.02f, 0.02f, 0.02f, 0.39f);
     style->Colors[ImGuiCol_HeaderHovered] = ImVec4(0.17f, 0.25f, 0.27f, 0.78f);
     style->Colors[ImGuiCol_HeaderActive] = ImVec4(0.17f, 0.25f, 0.27f, 0.78f);
     style->Colors[ImGuiCol_Separator] = ImVec4(0.35f, 0.35f, 0.35f, 1.00f);
@@ -3095,63 +3346,11 @@ namespace dxvk {
     style->Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.56f);
   }
 
-  void ImGUI::setLegacyStyle(ImGuiStyle* dst) {
+  void ImGUI::setNvidiaInspiredStyle(ImGuiStyle* dst) {
     ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
 
-    // Original ImGui theme from ImGuiStyle::ImGuiStyle()
-    style->Alpha = 1.0f;
-    style->DisabledAlpha = 0.60f;
-    style->WindowPadding = ImVec2(8, 8);
-    style->WindowRounding = 0.0f;
-    style->WindowBorderSize = 1.0f;
-    style->WindowMinSize = ImVec2(32, 32);
-    style->WindowTitleAlign = ImVec2(0.0f, 0.5f);
-    style->WindowMenuButtonPosition = ImGuiDir_Left;
-    style->ChildRounding = 0.0f;
-    style->ChildBorderSize = 1.0f;
-    style->PopupRounding = 0.0f;
-    style->PopupBorderSize = 1.0f;
-    style->FramePadding = compactGui() ? ImVec2(4, 3) : ImVec2(7, 5);
-    style->FrameRounding = 0.0f;
-    style->FrameBorderSize = 0.0f;
-    style->ItemSpacing = compactGui() ? ImVec2(8, 4) : ImVec2(3, 5);
-    style->ItemInnerSpacing = compactGui() ? ImVec2(4, 4) : ImVec2(3, 8);
-    style->CellPadding = ImVec2(4, 2);
-    style->TouchExtraPadding = ImVec2(0, 0);
-    style->IndentSpacing = 21.0f;
-    style->ColumnsMinSpacing = 6.0f;
-    style->ScrollbarSize = 14.0f;
-    style->ScrollbarRounding = 9.0f;
-    style->GrabMinSize = 10.0f;
-    style->GrabRounding = 0.0f;
-    style->LogSliderDeadzone = 4.0f;
-    style->TabRounding = 4.0f;
-    style->TabBorderSize = 0.0f;
-    style->TabMinWidthForCloseButton = 0.0f;
-    style->ColorButtonPosition = ImGuiDir_Right;
-    style->ButtonTextAlign = ImVec2(0.5f, 0.5f);
-    style->SelectableTextAlign = ImVec2(0.0f, 0.0f);
-    style->DisplayWindowPadding = ImVec2(19, 19);
-    style->DisplaySafeAreaPadding = ImVec2(3, 3);
-    style->MouseCursorScale = 1.0f;
-    style->AntiAliasedLines = true;
-    style->AntiAliasedLinesUseTex = true;
-    style->AntiAliasedFill = true;
-    style->CurveTessellationTol = 1.25f;
-    style->CircleTessellationMaxError = 0.30f;
-    ImGui::StyleColorsDark(style);
-
-    // Remix changes
-    style->Colors[ImGuiCol_WindowBg] = ImVec4(0.f, 0.f, 0.f, backgroundAlpha());
-    style->Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.f, 0.f, 0.f, 0.4f);
-    style->TabRounding = 1;
-  }
-
-  void ImGUI::setNvidiaStyle(ImGuiStyle* dst) {
-    ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
-
-    // Based on legacy theme
-    setLegacyStyle(style);
+    // Based on default theme
+    setDefaultStyle(style);
 
     style->Colors[ImGuiCol_Text] = ImVec4(0.91f, 0.91f, 0.91f, 1.00f);
     style->Colors[ImGuiCol_TextDisabled] = ImVec4(0.44f, 0.44f, 0.44f, 1.00f);
@@ -3208,39 +3407,39 @@ namespace dxvk {
     style->Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.56f);
   }
 
-  void ImGUI::onThemeChange(DxvkDevice* device) {
-    if (GImGui != nullptr) {
-      ImGUI& gui = device->getCommon()->getImgui();
-      gui.setupStyle();
-
-    }
-  }
-
-  void ImGUI::onBackgroundAlphaChange(DxvkDevice* device) {
-    if (GImGui != nullptr) {
-      ImGUI& gui = device->getCommon()->getImgui();
-      gui.adjustStyleBackgroundAlpha(backgroundAlpha());
-    }
-  }
-
   void ImGUI::setupStyle(ImGuiStyle* dst) {
-    ImGui::GetIO().FontDefault = largeUiMode() ? m_largeFont : m_regularFont;
+    if (!m_init) {
+      m_compactUIMode = compactGui.get();
+      m_backgroundAlpha = backgroundAlpha.get();
+      m_currTheme = (Theme)themeGui.get();
+    }
+
     updateWindowWidths();
    
     ImGuiStyle* style = dst ? dst : &ImGui::GetStyle();
-    switch (themeGui())
+    switch (m_currTheme)
     {
     default:
-    case Theme::Toolkit:
-      setToolkitStyle(style);
+    case kTheme_Default:
+      if (m_init) {
+        m_backgroundAlpha = 0.6f;
+      }
+      setDefaultStyle(style);
       break;
-
-    case Theme::Legacy:
-      setLegacyStyle(style);
+    case kTheme_Toolkit:
+      if (m_init) {
+        m_backgroundAlpha = 0.9f;
+      }
+      setToolkitInspiredStyle(style);
       break;
-    
-    case Theme::Nvidia:
-      setNvidiaStyle(style);
+    case kTheme_Nvidia:
+      if (m_init) {
+        m_backgroundAlpha = 0.8f;
+      }
+      setNvidiaInspiredStyle(style);
+      break;
+    case kTheme_Count:
+      assert(false && "kTheme_Count hit in ImGUI::setupStyle");
       break;
     }
   }
@@ -3480,7 +3679,7 @@ namespace dxvk {
   }
 
   void ImGUI::showRenderingSettings(const Rc<DxvkContext>& ctx) {
-    ImGui::PushItemWidth(largeUiMode() ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
+    ImGui::PushItemWidth(m_largeUIMode ? m_largeWindowWidgetWidth : m_regularWindowWidgetWidth);
     auto common = ctx->getCommonObjects();
 
     ImGui::Text("Disclaimer: The following settings are intended for developers,\nchanging them may introduce instability.");
@@ -3545,7 +3744,24 @@ namespace dxvk {
         ImGui::SliderFloat("Resolution scale", &RtxOptions::resolutionScaleObject(), 0.5f, 1.0f);
         ImGui::SliderFloat("Sharpness", &ctx->getCommonObjects()->metaNIS().m_sharpness, 0.1f, 1.0f);
         ImGui::Checkbox("Use FP16", &ctx->getCommonObjects()->metaNIS().m_useFp16);
-      } else if (RtxOptions::upscalerType() == UpscalerType::TAAU) {
+      } else if (RtxOptions::upscalerType() == UpscalerType::XeSS) {
+          xessProfileCombo.getKey(&RtxOptions::xessProfileObject());
+
+          // Show resolution slider only for Custom preset
+          if (RtxOptions::xessProfile() == XeSSProfile::Custom) {
+            m_userGraphicsSettingChanged |= ImGui::SliderFloat("Resolution Scale", &RtxOptions::resolutionScaleObject(), 0.1f, 1.0f, "%.2f");
+          }
+
+          // Display XeSS internal resolution
+          auto& xess = ctx->getCommonObjects()->metaXeSS();
+
+          uint32_t inputWidth;
+          uint32_t inputHeight;
+          xess.getInputSize(inputWidth, inputHeight);
+          ImGui::TextWrapped(str::format("Internal Resolution: ", inputWidth, "x", inputHeight).c_str());
+
+
+        } else if (RtxOptions::upscalerType() == UpscalerType::TAAU) {
         ImGui::SliderFloat("Resolution scale", &RtxOptions::resolutionScaleObject(), 0.5f, 1.0f);
       }
 

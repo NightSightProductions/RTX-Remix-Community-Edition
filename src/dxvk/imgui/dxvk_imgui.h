@@ -171,7 +171,7 @@ namespace dxvk {
     float                 m_regularUserWindowWidth = 600.f;
     float                 m_regularUserWindowHeight = 720.f;
     // Width of item+label widgets in regular mode (user menu)
-    float                 m_regularUserWindowWidgetWidth = 140.f;
+    float                 m_regularUserWindowWidgeWidth = 140.f;
 
     float                 m_largeUserWindowWidth = 776.0f;
     float                 m_largeUserWindowHeight = 926.0f;
@@ -179,8 +179,19 @@ namespace dxvk {
     float                 m_largeUserWindowWidgeWidth = 252.f;
 
     bool                  m_windowOnRight = true;
+    bool                  m_compactUIMode = true;
+    bool                  m_largeUIMode = false;
     bool                  m_pendingUIOptionsScroll = false;
 
+    static constexpr const char* themeNames[] = { "Default", "Toolkit Inspired", "Nvidia Inspired" };
+    enum Theme {
+      kTheme_Default = 0,
+      kTheme_Toolkit,
+      kTheme_Nvidia,
+      kTheme_Count
+    };
+    Theme                 m_currTheme = kTheme_Default;
+    float                 m_backgroundAlpha = 0.8f;
 
     float                 m_windowWidth = m_regularWindowWidth;
     float                 m_userWindowWidth = m_regularUserWindowWidth;
@@ -264,11 +275,11 @@ namespace dxvk {
     // Adjusts window widths based on various UI settings
     void updateWindowWidths();
     // Sets default remix UI theme
-    void setLegacyStyle(ImGuiStyle* dst);
+    void setDefaultStyle(ImGuiStyle* dst);
     // Sets toolkit inspired UI theme
-    void setToolkitStyle(ImGuiStyle* dst);
+    void setToolkitInspiredStyle(ImGuiStyle* dst);
     // Sets Nvidia inspired UI theme
-    void setNvidiaStyle(ImGuiStyle* dst);
+    void setNvidiaInspiredStyle(ImGuiStyle* dst);
     // Custom style
     void setupStyle(ImGuiStyle* dst = NULL);
 
@@ -283,16 +294,9 @@ namespace dxvk {
     RTX_OPTION("rtx.gui", std::uint32_t, hudMessageAnimatedDotDurationMilliseconds, 1000, "A duration in milliseconds between each dot in the animated dot sequence for HUD messages. Must be greater than 0.\nThese dots help indicate progress is happening to the user with a bit of animation which can be configured to animate at whatever speed is desired.");
     RTX_OPTION("rtx.gui", float, reflexStatRangeInterpolationRate, 0.05f, "A value controlling the interpolation rate applied to the Reflex stat graph ranges for smoother visualization.");
     RTX_OPTION("rtx.gui", float, reflexStatRangePaddingRatio, 0.05f, "A value specifying the amount of padding applied to the Reflex stat graph ranges as a ratio to the calculated range.");
-
-    public: static void onThemeChange(DxvkDevice* device);
-    public: static void onBackgroundAlphaChange(DxvkDevice* device);
-    RTX_OPTION_ARGS("rtx.gui", bool, compactGui, false, "A setting to toggle between compact and spacious GUI modes.", args.onChangeCallback = &onThemeChange);
-    RTX_OPTION_ARGS("rtx.gui", float, backgroundAlpha, 0.90f, "A value controlling the alpha of the GUI background.",
-       args.onChangeCallback = &onBackgroundAlphaChange, args.minValue = 0.0f, args.maxValue = 1.0f);
-    RTX_OPTION_ARGS("rtx.gui", Theme, themeGui, Theme::Toolkit, "A setting controlling the active GUI theme.", args.onChangeCallback = &onThemeChange);
-    RTX_OPTION_ARGS("rtx.gui", bool, largeUiMode, false, "Toggles between Large and Regular GUI Scale Modes.", args.onChangeCallback = &onThemeChange);
-
-    private:
+    RTX_OPTION("rtx.gui", bool, compactGui, true, "A setting to toggle between compact and spacious GUI modes.");
+    RTX_OPTION("rtx.gui", float, backgroundAlpha, 0.90f, "A value controlling the alpha of the GUI background.");
+    RTX_OPTION("rtx.gui", int, themeGui, (int)Theme::kTheme_Default, "A setting controlling the active GUI theme.");
 
     void onCloseMenus();
     void onOpenMenus();
